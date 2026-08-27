@@ -1,4 +1,5 @@
 {
+  "githubRepo": "amosmarom/kmeans",
   "datasets": [
     {
       "id": "geoCities",

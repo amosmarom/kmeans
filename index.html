@@ -974,19 +974,28 @@ function findScenario(id){ return CATALOG.scenarios.find(s=>s.id===id) || teache
 let liveDataFiles = null; // null = not fetched / unavailable; [] = fetched, empty; [...] = files found
 
 function detectGitHubRepo(){
+  // Prefer an explicit "githubRepo": "owner/repo" in catalog.json -- this makes
+  // the live listing work regardless of where the page happens to be served
+  // from (localhost while testing, a custom domain, GitHub Pages itself, etc.),
+  // since it doesn't depend on parsing the hostname at all.
+  if(CATALOG.githubRepo && /^[\w.-]+\/[\w.-]+$/.test(CATALOG.githubRepo)){
+    const [owner, repo] = CATALOG.githubRepo.split('/');
+    return { owner, repo };
+  }
+  // Fallback: infer from a *.github.io/<repo>/... URL
   const host = window.location.hostname;
   const m = host.match(/^([a-z0-9-]+)\.github\.io$/i);
   if(!m) return null;
   const owner = m[1];
   const repo = window.location.pathname.split('/').filter(Boolean)[0];
-  return repo ? { owner, repo } : null; // no repo segment => user/org root site, can't infer a repo name
+  return repo ? { owner, repo } : null;
 }
 
 async function fetchLiveDataFiles(){
   const repoInfo = detectGitHubRepo();
   if(!repoInfo){
     liveDataFiles = null;
-    $('dataFilesStatus').textContent = 'לא זוהה ריפו GitHub Pages (למשל בבדיקה מקומית) — מוצגים רק קבצים הרשומים ב-catalog.json.';
+    $('dataFilesStatus').textContent = 'לא ידוע לאיזה ריפו GitHub לפנות — הוסיפו "githubRepo": "owner/repo" ל-catalog.json, או פרסמו ב-GitHub Pages. מוצגים רק קבצים הרשומים ב-catalog.json.';
     return;
   }
   $('dataFilesStatus').textContent = `בודק את תיקיית data/ ב-${repoInfo.owner}/${repoInfo.repo}…`;

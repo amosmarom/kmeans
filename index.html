@@ -226,7 +226,7 @@
     <div class="panel" id="panelScenario">
       <h2>תרחישי לימוד</h2>
       <label class="field">
-        <span class="lbl">בחרו שאלה מודרכת</span>
+        <span class="lbl">בחרו תרחיש מודרך או סט נתונים מהמאגר</span>
         <select id="scenarioSelect">
           <option value="free">— מצב חופשי (ללא תרחיש) —</option>
         </select>
@@ -238,13 +238,10 @@
     <div class="panel">
       <h2>נתונים</h2>
       <label class="field" id="ctrlFileUpload">
-        <span class="lbl">טעינת קובץ CSV</span>
+        <span class="lbl">טעינת קובץ CSV משלכם</span>
         <input type="file" id="fileInput" accept=".csv,text/csv">
       </label>
-      <div id="datasetButtonsWrap">
-        <div class="lbl" style="margin-bottom:6px;">מאגר קבצים מובנה</div>
-        <div class="row" id="datasetButtonsRow" style="flex-wrap:wrap;"></div>
-      </div>
+      <div class="hint">כל קובץ בתיקיית <code>data/</code> של האתר מופיע אוטומטית בתפריט "תרחישי לימוד" למעלה, תחת "מאגר קבצים" — אין צורך לבחור אותו כאן.</div>
       <div id="colSelectors" style="margin-top:12px; display:none;">
         <label class="field" id="vizModeWrap" style="display:none;">
           <span class="lbl">מצב תצוגה</span>
@@ -935,16 +932,46 @@ async function loadCatalog(){
     $('catalogError').textContent = 'לא ניתן לטעון את catalog.json. אם פתחתם את הקובץ ישירות מהדיסק, הריצו שרת מקומי (למשל: python -m http.server) או פרסמו ב-GitHub Pages — טעינת קבצים אוטומטית דורשת שרת http.';
     CATALOG = { datasets: [], scenarios: [] };
   }
-  // scenario dropdown
-  CATALOG.scenarios.forEach(sc=>{
-    const o = document.createElement('option'); o.value = sc.id; o.textContent = sc.title;
-    $('scenarioSelect').appendChild(o);
-  });
   // teacher config: default every catalog dataset to "visible" the first time it's seen
   CATALOG.datasets.forEach(ds=>{ if(!(ds.id in teacherConfig.library)) teacherConfig.library[ds.id] = true; });
+  rebuildScenarioOptions();
 }
 
 function findDataset(id){ return CATALOG.datasets.find(d=>d.id===id); }
+
+// Builds the single unified dropdown: curated scenarios (rich config from
+// catalog.json's "scenarios" array) plus every teacher-enabled file from
+// catalog.json's "datasets" array (i.e. every CSV that exists in /data),
+// each treated as a lightweight scenario in its own right.
+function rebuildScenarioOptions(){
+  const sel = $('scenarioSelect');
+  const prevVal = sel.value;
+  sel.innerHTML = '<option value="free">— מצב חופשי (ללא תרחיש) —</option>';
+
+  if(CATALOG.scenarios && CATALOG.scenarios.length){
+    const og = document.createElement('optgroup'); og.label = 'תרחישי לימוד מוגדרים';
+    CATALOG.scenarios.forEach(sc=>{
+      const o = document.createElement('option'); o.value = 'scenario:'+sc.id; o.textContent = sc.title;
+      og.appendChild(o);
+    });
+    sel.appendChild(og);
+  }
+
+  if(teacherConfig.visible.datasetLibraryUI){
+    const enabled = CATALOG.datasets.filter(ds=>teacherConfig.library[ds.id]);
+    if(enabled.length){
+      const og2 = document.createElement('optgroup'); og2.label = 'מאגר קבצים (כל קובץ בתיקיית data)';
+      enabled.forEach(ds=>{
+        const o = document.createElement('option'); o.value = 'dataset:'+ds.id; o.textContent = ds.name; o.title = ds.desc;
+        og2.appendChild(o);
+      });
+      sel.appendChild(og2);
+    }
+  }
+
+  // keep the current selection if it's still a valid option, otherwise fall back to free
+  sel.value = [...sel.options].some(o=>o.value===prevVal) ? prevVal : 'free';
+}
 
 async function loadDatasetById(id){
   const ds = findDataset(id);
@@ -962,24 +989,45 @@ async function loadDatasetById(id){
   }
 }
 
-async function applyScenario(id){
-  if(id==='free'){
+// Selecting anything other than "free" — whether a curated scenario or a raw
+// file from /data — loads its data and drives the same scenario UI (description
+// + random-init button), so every file in the catalog behaves like a scenario.
+async function applyScenario(value){
+  if(value==='free'){
     $('scenarioDesc').style.display = 'none';
     $('btnScenarioRandom').style.display = 'none';
     return;
   }
-  const sc = CATALOG.scenarios.find(s=>s.id===id);
-  if(!sc) return;
-  await loadDatasetById(sc.dataset);
-  state.k = sc.defaultK != null ? sc.defaultK : state.k;
-  $('kValue').textContent = state.k;
-  resetModel(true);
-  if(sc.defaultShowLines != null) setShowLines(!!sc.defaultShowLines);
-  if(sc.defaultMinMax != null) setMinMax(!!sc.defaultMinMax);
-  $('scenarioDesc').textContent = sc.description;
-  $('scenarioDesc').style.display = 'block';
-  $('btnScenarioRandom').style.display = 'block';
-  setStatus(`נטען תרחיש: ${sc.title}`);
+  const sepIdx = value.indexOf(':');
+  const kind = value.slice(0, sepIdx), id = value.slice(sepIdx+1);
+
+  if(kind==='scenario'){
+    const sc = CATALOG.scenarios.find(s=>s.id===id);
+    if(!sc) return;
+    await loadDatasetById(sc.dataset);
+    state.k = sc.defaultK != null ? sc.defaultK : state.k;
+    $('kValue').textContent = state.k;
+    resetModel(true);
+    if(sc.defaultShowLines != null) setShowLines(!!sc.defaultShowLines);
+    if(sc.defaultMinMax != null) setMinMax(!!sc.defaultMinMax);
+    $('scenarioDesc').textContent = sc.description;
+    $('scenarioDesc').style.display = 'block';
+    $('btnScenarioRandom').style.display = 'block';
+    setStatus(`נטען תרחיש: ${sc.title}`);
+  } else if(kind==='dataset'){
+    const ds = findDataset(id);
+    if(!ds) return;
+    await loadDatasetById(ds.id);
+    state.k = 3;
+    $('kValue').textContent = state.k;
+    resetModel(true);
+    setShowLines(false);
+    setMinMax(false);
+    $('scenarioDesc').textContent = `${ds.name} — ${ds.desc}. נסו ערכי K שונים, גררו את הצנטרואידים, והריצו את האלגוריתם כדי לחקור את הנתונים.`;
+    $('scenarioDesc').style.display = 'block';
+    $('btnScenarioRandom').style.display = 'block';
+    setStatus(`נטען סט נתונים: ${ds.name}`);
+  }
 }
 
 // ---------------- Teacher configuration (Ctrl+C+M) ----------------
@@ -993,29 +1041,11 @@ const teacherConfig = {
 };
 
 const VIS_TARGETS = {
-  scenarioPanel:'panelScenario', fileUpload:'ctrlFileUpload', datasetLibraryUI:'datasetButtonsWrap',
+  scenarioPanel:'panelScenario', fileUpload:'ctrlFileUpload',
   kControl:'ctrlKControl', reinitButton:'btnReinit', runButtons:'ctrlRunButtons',
   speedControl:'ctrlSpeedControl', linesToggle:'btnLines', minmaxToggle:'btnMinMax',
   silhouetteToggle:'btnSilhouette', aboutPanel:'panelAbout', resetButton:'btnReset'
 };
-
-function renderDatasetButtons(){
-  const row = $('datasetButtonsRow'); if(!row) return;
-  row.innerHTML = '';
-  CATALOG.datasets.forEach(ds=>{
-    if(!teacherConfig.library[ds.id]) return;
-    const b = document.createElement('button');
-    b.className = 'small'; b.title = ds.desc; b.textContent = ds.name;
-    b.style.flex = '1 1 45%';
-    b.addEventListener('click', ()=>loadDatasetById(ds.id));
-    row.appendChild(b);
-  });
-  if(row.children.length===0){
-    const p = document.createElement('div'); p.className='hint';
-    p.textContent = CATALOG.datasets.length ? 'המורה לא הפעיל/ה סטי נתונים מהמאגר.' : 'המאגר ריק או שלא נטען.';
-    row.appendChild(p);
-  }
-}
 
 function applyTeacherConfig(){
   Object.keys(VIS_TARGETS).forEach(k=>{
@@ -1024,7 +1054,7 @@ function applyTeacherConfig(){
   });
   if(state.rows && state.rows.length) populateColumnUI();
   else $('colSelectors').style.display = 'none';
-  renderDatasetButtons();
+  rebuildScenarioOptions();
 }
 
 function populateTeacherModalInputs(){
@@ -1049,7 +1079,7 @@ $('teacherModal').addEventListener('change', e=>{
   }
   if(e.target.dataset && e.target.dataset.lib){
     teacherConfig.library[e.target.dataset.lib] = e.target.checked;
-    renderDatasetButtons();
+    rebuildScenarioOptions();
   }
 });
 $('btnCloseTeacher').addEventListener('click', closeTeacherModal);
@@ -1195,7 +1225,7 @@ $('btnReset').addEventListener('click', resetAll);
 // init
 $('kValue').textContent = state.k;
 render();
-const catalogReady = loadCatalog().then(()=>{ renderDatasetButtons(); });
+const catalogReady = loadCatalog();
 })();
 </script>
 </body>

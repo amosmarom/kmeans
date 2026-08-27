@@ -186,6 +186,9 @@
   .tm-col h3{ font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--amber); margin:0 0 10px 0; }
   .tm-check{ display:flex; align-items:flex-start; gap:8px; font-size:13px; margin-bottom:9px; cursor:pointer; line-height:1.4; }
   .tm-check input{ accent-color:var(--cyan); width:15px; height:15px; margin-top:2px; flex-shrink:0; }
+  .tm-scenario-row{ display:flex; align-items:center; gap:8px; margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid var(--border); }
+  .tm-scenario-row .tm-check{ margin-bottom:0; }
+  .tm-scenario-row button{ flex-shrink:0; padding:4px 9px; }
   .teacher-modal-actions{ display:flex; gap:8px; flex-wrap:wrap; padding:14px 18px; border-top:1px solid var(--border); }
   .btn-file-fake{
     font-family:var(--sans); font-size:12.5px; font-weight:500; cursor:pointer; border-radius:5px;
@@ -241,7 +244,7 @@
         <span class="lbl">טעינת קובץ CSV משלכם</span>
         <input type="file" id="fileInput" accept=".csv,text/csv">
       </label>
-      <div class="hint">כל קובץ בתיקיית <code>data/</code> של האתר מופיע אוטומטית בתפריט "תרחישי לימוד" למעלה, תחת "מאגר קבצים" — אין צורך לבחור אותו כאן.</div>
+      <div class="hint">קבצים בתיקיית <code>data/</code> הופכים לזמינים בתפריט "תרחישי לימוד" למעלה רק לאחר שנוצר עבורם תרחיש בחלון הגדרות מורה (Ctrl+C, ואז Ctrl+M).</div>
       <div id="colSelectors" style="margin-top:12px; display:none;">
         <label class="field" id="vizModeWrap" style="display:none;">
           <span class="lbl">מצב תצוגה</span>
@@ -369,7 +372,6 @@
         <h3>אלמנטים גלויים לתלמיד</h3>
         <label class="tm-check"><input type="checkbox" data-vis="scenarioPanel"> פאנל תרחישי לימוד</label>
         <label class="tm-check"><input type="checkbox" data-vis="fileUpload"> טעינת קובץ CSV</label>
-        <label class="tm-check"><input type="checkbox" data-vis="datasetLibraryUI"> כפתורי מאגר נתונים</label>
         <label class="tm-check"><input type="checkbox" data-vis="columnSelectors"> בחירת עמודות / מצב תצוגה</label>
         <label class="tm-check"><input type="checkbox" data-vis="kControl"> שליטה ב-K</label>
         <label class="tm-check"><input type="checkbox" data-vis="reinitButton"> כפתור אתחול צנטרואידים</label>
@@ -380,11 +382,32 @@
         <label class="tm-check"><input type="checkbox" data-vis="silhouetteToggle"> ניתוח סילואט</label>
         <label class="tm-check"><input type="checkbox" data-vis="aboutPanel"> פאנל "אודות המודל"</label>
         <label class="tm-check"><input type="checkbox" data-vis="resetButton"> כפתור איפוס</label>
+
+        <h3 style="margin-top:22px;">תרחישים קיימים</h3>
+        <div id="tmScenarioList"></div>
       </div>
       <div class="tm-col">
-        <h3>מאגר קבצים מובנה — זמין לתלמיד</h3>
-        <div id="tmLibraryList"></div>
-        <div class="hint" style="margin-top:10px;">בחרו אילו סטים מוכנים יופיעו לתלמיד בפאנל הנתונים. קובץ CSV אישי עדיין ניתן לטעינה אם "טעינת קובץ CSV" מסומן.</div>
+        <h3>יצירת תרחיש חדש</h3>
+        <label class="field">
+          <span class="lbl">שם התרחיש (יופיע בתפריט הראשי)</span>
+          <input type="text" id="newScenarioName" placeholder="לדוגמה: שאלה 2 · אשכולות לקוחות">
+        </label>
+        <label class="field">
+          <span class="lbl">קובץ מתיקיית data/</span>
+          <select id="newScenarioFile"><option value="">— בחרו קובץ —</option></select>
+        </label>
+        <label class="field">
+          <span class="lbl">תיאור לתלמיד (רשות)</span>
+          <input type="text" id="newScenarioDesc" placeholder="מה המטרה של התרחיש?">
+        </label>
+        <label class="field">
+          <span class="lbl">K ברירת מחדל</span>
+          <input type="text" inputmode="numeric" id="newScenarioK" value="3">
+        </label>
+        <label class="tm-check"><input type="checkbox" id="newScenarioMinMax"> Min-Max כברירת מחדל</label>
+        <label class="tm-check"><input type="checkbox" id="newScenarioLines" checked> הצג קווי מרחק כברירת מחדל</label>
+        <button class="btn-full primary" id="btnAddScenario" style="margin-top:6px;">➕ הוסף תרחיש לתפריט</button>
+        <div class="hint" style="margin-top:10px;">התרחיש נשמר לסשן הנוכחי בדפדפן. כדי לשמור אותו לצמיתות, ייצאו קונפיגורציה (למטה) ושמרו את הקובץ, או העתיקו את הגדרתו ידנית ל-<code>catalog.json</code>.</div>
       </div>
     </div>
     <div class="teacher-modal-actions">
@@ -932,41 +955,39 @@ async function loadCatalog(){
     $('catalogError').textContent = 'לא ניתן לטעון את catalog.json. אם פתחתם את הקובץ ישירות מהדיסק, הריצו שרת מקומי (למשל: python -m http.server) או פרסמו ב-GitHub Pages — טעינת קבצים אוטומטית דורשת שרת http.';
     CATALOG = { datasets: [], scenarios: [] };
   }
-  // teacher config: default every catalog dataset to "visible" the first time it's seen
-  CATALOG.datasets.forEach(ds=>{ if(!(ds.id in teacherConfig.library)) teacherConfig.library[ds.id] = true; });
   rebuildScenarioOptions();
 }
 
 function findDataset(id){ return CATALOG.datasets.find(d=>d.id===id); }
+function findScenario(id){ return CATALOG.scenarios.find(s=>s.id===id) || teacherConfig.customScenarios.find(s=>s.id===id); }
 
-// Builds the single unified dropdown: curated scenarios (rich config from
-// catalog.json's "scenarios" array) plus every teacher-enabled file from
-// catalog.json's "datasets" array (i.e. every CSV that exists in /data),
-// each treated as a lightweight scenario in its own right.
+// Builds the main dropdown from *authored scenarios only* — scenarios pre-defined
+// in catalog.json, plus any the teacher created live in the config panel. Raw
+// files in /data are never listed directly; they only become selectable once a
+// scenario wraps them with a name, a K, and Min-Max/lines defaults.
 function rebuildScenarioOptions(){
   const sel = $('scenarioSelect');
   const prevVal = sel.value;
   sel.innerHTML = '<option value="free">— מצב חופשי (ללא תרחיש) —</option>';
 
-  if(CATALOG.scenarios && CATALOG.scenarios.length){
-    const og = document.createElement('optgroup'); og.label = 'תרחישי לימוד מוגדרים';
-    CATALOG.scenarios.forEach(sc=>{
-      const o = document.createElement('option'); o.value = 'scenario:'+sc.id; o.textContent = sc.title;
+  const visibleCatalog = CATALOG.scenarios.filter(sc=>teacherConfig.scenarioVisibility[sc.id] !== false);
+  if(visibleCatalog.length){
+    const og = document.createElement('optgroup'); og.label = 'תרחישי לימוד מוגדרים מראש';
+    visibleCatalog.forEach(sc=>{
+      const o = document.createElement('option'); o.value = sc.id; o.textContent = sc.title;
       og.appendChild(o);
     });
     sel.appendChild(og);
   }
 
-  if(teacherConfig.visible.datasetLibraryUI){
-    const enabled = CATALOG.datasets.filter(ds=>teacherConfig.library[ds.id]);
-    if(enabled.length){
-      const og2 = document.createElement('optgroup'); og2.label = 'מאגר קבצים (כל קובץ בתיקיית data)';
-      enabled.forEach(ds=>{
-        const o = document.createElement('option'); o.value = 'dataset:'+ds.id; o.textContent = ds.name; o.title = ds.desc;
-        og2.appendChild(o);
-      });
-      sel.appendChild(og2);
-    }
+  const visibleCustom = teacherConfig.customScenarios.filter(sc=>teacherConfig.scenarioVisibility[sc.id] !== false);
+  if(visibleCustom.length){
+    const og2 = document.createElement('optgroup'); og2.label = 'תרחישים שנוצרו על ידי המורה';
+    visibleCustom.forEach(sc=>{
+      const o = document.createElement('option'); o.value = sc.id; o.textContent = sc.title;
+      og2.appendChild(o);
+    });
+    sel.appendChild(og2);
   }
 
   // keep the current selection if it's still a valid option, otherwise fall back to free
@@ -989,55 +1010,38 @@ async function loadDatasetById(id){
   }
 }
 
-// Selecting anything other than "free" — whether a curated scenario or a raw
-// file from /data — loads its data and drives the same scenario UI (description
-// + random-init button), so every file in the catalog behaves like a scenario.
-async function applyScenario(value){
-  if(value==='free'){
+async function applyScenario(id){
+  if(id==='free'){
     $('scenarioDesc').style.display = 'none';
     $('btnScenarioRandom').style.display = 'none';
     return;
   }
-  const sepIdx = value.indexOf(':');
-  const kind = value.slice(0, sepIdx), id = value.slice(sepIdx+1);
-
-  if(kind==='scenario'){
-    const sc = CATALOG.scenarios.find(s=>s.id===id);
-    if(!sc) return;
-    await loadDatasetById(sc.dataset);
-    state.k = sc.defaultK != null ? sc.defaultK : state.k;
-    $('kValue').textContent = state.k;
-    resetModel(true);
-    if(sc.defaultShowLines != null) setShowLines(!!sc.defaultShowLines);
-    if(sc.defaultMinMax != null) setMinMax(!!sc.defaultMinMax);
-    $('scenarioDesc').textContent = sc.description;
-    $('scenarioDesc').style.display = 'block';
-    $('btnScenarioRandom').style.display = 'block';
-    setStatus(`נטען תרחיש: ${sc.title}`);
-  } else if(kind==='dataset'){
-    const ds = findDataset(id);
-    if(!ds) return;
-    await loadDatasetById(ds.id);
-    state.k = 3;
-    $('kValue').textContent = state.k;
-    resetModel(true);
-    setShowLines(false);
-    setMinMax(false);
-    $('scenarioDesc').textContent = `${ds.name} — ${ds.desc}. נסו ערכי K שונים, גררו את הצנטרואידים, והריצו את האלגוריתם כדי לחקור את הנתונים.`;
-    $('scenarioDesc').style.display = 'block';
-    $('btnScenarioRandom').style.display = 'block';
-    setStatus(`נטען סט נתונים: ${ds.name}`);
-  }
+  const sc = findScenario(id);
+  if(!sc) return;
+  await loadDatasetById(sc.dataset);
+  state.k = sc.defaultK != null ? sc.defaultK : state.k;
+  $('kValue').textContent = state.k;
+  resetModel(true);
+  if(sc.defaultShowLines != null) setShowLines(!!sc.defaultShowLines);
+  if(sc.defaultMinMax != null) setMinMax(!!sc.defaultMinMax);
+  $('scenarioDesc').textContent = sc.description || '';
+  $('scenarioDesc').style.display = sc.description ? 'block' : 'none';
+  $('btnScenarioRandom').style.display = 'block';
+  setStatus(`נטען תרחיש: ${sc.title}`);
 }
 
 // ---------------- Teacher configuration (Ctrl+C+M) ----------------
+// The teacher panel is where scenarios are actually built: pick a name, a file
+// from /data, and the K / Min-Max / lines defaults. Only what's built here (or
+// pre-authored in catalog.json) ever reaches the student-facing dropdown.
 const teacherConfig = {
   visible: {
-    scenarioPanel:true, fileUpload:true, datasetLibraryUI:true, columnSelectors:true,
+    scenarioPanel:true, fileUpload:true, columnSelectors:true,
     kControl:true, reinitButton:true, runButtons:true, speedControl:true,
     linesToggle:true, minmaxToggle:true, silhouetteToggle:true, aboutPanel:true, resetButton:true
   },
-  library: {}
+  scenarioVisibility: {},   // scenario id -> shown to student (default true)
+  customScenarios: []       // scenarios created live: {id, title, description, dataset, defaultK, defaultMinMax, defaultShowLines}
 };
 
 const VIS_TARGETS = {
@@ -1059,11 +1063,38 @@ function applyTeacherConfig(){
 
 function populateTeacherModalInputs(){
   document.querySelectorAll('#teacherModal [data-vis]').forEach(cb=>{ cb.checked = !!teacherConfig.visible[cb.dataset.vis]; });
-  const libList = $('tmLibraryList'); libList.innerHTML='';
+
+  // file picker for the "create new scenario" form — every file registered in
+  // catalog.json (i.e. every CSV present in /data)
+  const fileSel = $('newScenarioFile');
+  fileSel.innerHTML = '<option value="">— בחרו קובץ —</option>';
   CATALOG.datasets.forEach(ds=>{
-    const lbl = document.createElement('label'); lbl.className='tm-check';
-    lbl.innerHTML = `<input type="checkbox" data-lib="${ds.id}" ${teacherConfig.library[ds.id]?'checked':''}><span>${ds.name}<br><span class="hint">${ds.desc}</span></span>`;
-    libList.appendChild(lbl);
+    const o = document.createElement('option'); o.value = ds.id; o.textContent = `${ds.name}  (${ds.file})`; o.title = ds.desc;
+    fileSel.appendChild(o);
+  });
+
+  // scenario management list: catalog-authored (visibility toggle only) + custom (toggle + delete)
+  const list = $('tmScenarioList'); list.innerHTML = '';
+  const all = [
+    ...CATALOG.scenarios.map(s=>({...s, origin:'catalog'})),
+    ...teacherConfig.customScenarios.map(s=>({...s, origin:'custom'}))
+  ];
+  if(all.length===0){
+    const p = document.createElement('div'); p.className='hint'; p.textContent='אין עדיין תרחישים. צרו אחד בטופס משמאל.';
+    list.appendChild(p);
+    return;
+  }
+  all.forEach(sc=>{
+    const visible = teacherConfig.scenarioVisibility[sc.id] !== false;
+    const row = document.createElement('div'); row.className = 'tm-scenario-row';
+    row.innerHTML = `
+      <label class="tm-check">
+        <input type="checkbox" data-scenariovis="${sc.id}" ${visible?'checked':''}>
+        <span>${sc.title}<br><span class="hint">${sc.origin==='catalog' ? 'מוגדר מראש (catalog.json)' : 'נוצר על ידך'} · קובץ: ${sc.dataset}</span></span>
+      </label>
+      ${sc.origin==='custom' ? `<button class="small" data-del-scenario="${sc.id}" title="מחק תרחיש">✕</button>` : ''}
+    `;
+    list.appendChild(row);
   });
 }
 
@@ -1077,22 +1108,53 @@ $('teacherModal').addEventListener('change', e=>{
     teacherConfig.visible[e.target.dataset.vis] = e.target.checked;
     applyTeacherConfig();
   }
-  if(e.target.dataset && e.target.dataset.lib){
-    teacherConfig.library[e.target.dataset.lib] = e.target.checked;
+  if(e.target.dataset && e.target.dataset.scenariovis){
+    teacherConfig.scenarioVisibility[e.target.dataset.scenariovis] = e.target.checked;
     rebuildScenarioOptions();
   }
+});
+$('teacherModal').addEventListener('click', e=>{
+  if(e.target.dataset && e.target.dataset.delScenario){
+    const id = e.target.dataset.delScenario;
+    teacherConfig.customScenarios = teacherConfig.customScenarios.filter(s=>s.id!==id);
+    delete teacherConfig.scenarioVisibility[id];
+    populateTeacherModalInputs();
+    rebuildScenarioOptions();
+  }
+});
+$('btnAddScenario').addEventListener('click', ()=>{
+  const name = $('newScenarioName').value.trim();
+  const fileId = $('newScenarioFile').value;
+  if(!name){ setStatus('יש להזין שם לתרחיש.'); return; }
+  if(!fileId){ setStatus('יש לבחור קובץ מתיקיית data.'); return; }
+  const id = 'custom_' + Date.now();
+  const kVal = Math.max(1, Math.min(10, parseInt($('newScenarioK').value, 10) || 3));
+  teacherConfig.customScenarios.push({
+    id, title: name,
+    description: $('newScenarioDesc').value.trim(),
+    dataset: fileId,
+    defaultK: kVal,
+    defaultMinMax: $('newScenarioMinMax').checked,
+    defaultShowLines: $('newScenarioLines').checked
+  });
+  teacherConfig.scenarioVisibility[id] = true;
+  $('newScenarioName').value=''; $('newScenarioDesc').value=''; $('newScenarioFile').value='';
+  $('newScenarioK').value='3'; $('newScenarioMinMax').checked=false; $('newScenarioLines').checked=true;
+  populateTeacherModalInputs();
+  rebuildScenarioOptions();
+  setStatus(`התרחיש "${name}" נוצר ומופיע כעת בתפריט הראשי.`);
 });
 $('btnCloseTeacher').addEventListener('click', closeTeacherModal);
 $('btnTeacherFallback').addEventListener('click', openTeacherModal);
 $('btnTeacherApply').addEventListener('click', ()=>{ applyTeacherConfig(); closeTeacherModal(); });
 $('btnTeacherReset').addEventListener('click', ()=>{
   Object.keys(teacherConfig.visible).forEach(k=>teacherConfig.visible[k]=true);
-  teacherConfig.visible.columnSelectors = true;
-  Object.keys(teacherConfig.library).forEach(k=>teacherConfig.library[k]=true);
+  teacherConfig.scenarioVisibility = {};
   applyTeacherConfig(); populateTeacherModalInputs();
 });
 $('btnTeacherExport').addEventListener('click', ()=>{
-  const blob = new Blob([JSON.stringify(teacherConfig, null, 2)], {type:'application/json'});
+  const cfg = { visible: teacherConfig.visible, scenarioVisibility: teacherConfig.scenarioVisibility, customScenarios: teacherConfig.customScenarios };
+  const blob = new Blob([JSON.stringify(cfg, null, 2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href=url; a.download='kmenas_config.json';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
@@ -1105,7 +1167,8 @@ $('teacherImportInput').addEventListener('change', e=>{
     try{
       const cfg = JSON.parse(ev.target.result);
       if(cfg.visible) Object.assign(teacherConfig.visible, cfg.visible);
-      if(cfg.library) Object.assign(teacherConfig.library, cfg.library);
+      if(cfg.scenarioVisibility) Object.assign(teacherConfig.scenarioVisibility, cfg.scenarioVisibility);
+      if(Array.isArray(cfg.customScenarios)) teacherConfig.customScenarios = cfg.customScenarios;
       applyTeacherConfig(); populateTeacherModalInputs();
       setStatus('קונפיגורציה נטענה בהצלחה.');
     }catch(err){ setStatus('שגיאה בקריאת קובץ הקונפיגורציה.'); }

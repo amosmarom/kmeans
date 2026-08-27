@@ -1,0 +1,1202 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KMENAS · סימולטור K-Means אינטראקטיבי</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700;900&family=Roboto+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  :root{
+    --bg:#0d1016;
+    --panel:#161b24;
+    --panel2:#1d2330;
+    --border:#2a3140;
+    --text:#e7ebf1;
+    --muted:#8a94a6;
+    --cyan:#4fd6c4;
+    --amber:#e8a33d;
+    --magenta:#d1699a;
+    --danger:#e85b6a;
+    --good:#7fd858;
+    --mono:'Roboto Mono',monospace;
+    --sans:'Heebo',sans-serif;
+  }
+  * { box-sizing:border-box; }
+  html,body{ margin:0; padding:0; background:var(--bg); color:var(--text); font-family:var(--sans); }
+  body{ min-height:100vh; }
+  ::selection{ background:var(--cyan); color:#0d1016; }
+
+  .cluster-color{ display:inline-block; }
+
+  /* ===== Header ===== */
+  header.top{
+    display:flex; align-items:center; justify-content:space-between; gap:16px;
+    padding:14px 22px; border-bottom:1px solid var(--border);
+    background:linear-gradient(180deg,#121620,#0d1016);
+    position:sticky; top:0; z-index:50; flex-wrap:wrap;
+  }
+  .brand{ display:flex; align-items:baseline; gap:10px; }
+  .brand .mark{
+    font-family:var(--mono); font-weight:700; letter-spacing:2px; color:var(--cyan);
+    border:1px solid var(--cyan); padding:3px 8px; border-radius:3px; font-size:12px;
+  }
+  .brand h1{ font-size:19px; font-weight:700; margin:0; }
+  .brand .sub{ color:var(--muted); font-size:12.5px; }
+
+  .telemetry{ display:flex; align-items:center; gap:18px; }
+  .readout{ text-align:center; }
+  .readout .label{ font-size:10px; color:var(--muted); letter-spacing:1.5px; text-transform:uppercase; }
+  .readout .val{ font-family:var(--mono); font-size:20px; font-weight:700; color:var(--cyan); }
+  .trace-box{
+    width:150px; height:38px; background:#080a0e; border:1px solid var(--border); border-radius:4px;
+    position:relative; overflow:hidden;
+  }
+  .trace-box svg{ width:100%; height:100%; display:block; }
+
+  /* ===== Layout ===== */
+  .layout{
+    display:grid; grid-template-columns:270px 1fr 300px; gap:14px;
+    padding:14px; align-items:start;
+  }
+  @media (max-width:1050px){ .layout{ grid-template-columns:1fr; } }
+
+  .panel{
+    background:var(--panel); border:1px solid var(--border); border-radius:8px;
+    padding:14px; margin-bottom:14px;
+  }
+  .panel h2{
+    font-size:11px; text-transform:uppercase; letter-spacing:1.6px; color:var(--amber);
+    margin:0 0 12px 0; display:flex; align-items:center; gap:8px;
+  }
+  .panel h2::after{ content:''; flex:1; height:1px; background:var(--border); }
+
+  label.field{ display:block; margin-bottom:11px; }
+  label.field .lbl{ font-size:12.5px; color:var(--muted); margin-bottom:5px; display:block; }
+  select, input[type=file], input[type=text]{
+    width:100%; background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    border-radius:5px; padding:8px 9px; font-family:var(--sans); font-size:13px;
+  }
+  input[type=file]{ padding:6px; font-size:11.5px; }
+  input[type=range]{ width:100%; accent-color:var(--cyan); }
+
+  .row{ display:flex; gap:8px; }
+  .row > *{ flex:1; }
+
+  button{
+    font-family:var(--sans); font-size:12.5px; font-weight:500; cursor:pointer;
+    border-radius:5px; border:1px solid var(--border); background:var(--panel2); color:var(--text);
+    padding:9px 10px; transition:all .12s ease;
+  }
+  button:hover{ border-color:var(--cyan); color:var(--cyan); }
+  button:active{ transform:translateY(1px); }
+  button.primary{ background:var(--cyan); color:#0a1310; border-color:var(--cyan); font-weight:700; }
+  button.primary:hover{ filter:brightness(1.08); color:#0a1310; }
+  button.toggle.on{ background:var(--amber); color:#1a1206; border-color:var(--amber); font-weight:700; }
+  button.small{ padding:6px 8px; font-size:11.5px; }
+  button.reset-btn{ border-color:var(--danger); color:var(--danger); background:transparent; font-weight:700; }
+  button.reset-btn:hover{ background:var(--danger); color:#1a0a0c; border-color:var(--danger); }
+  @keyframes panelPulse{
+    0%{ box-shadow:0 0 0 0 rgba(232,163,61,.55); }
+    70%{ box-shadow:0 0 0 10px rgba(232,163,61,0); }
+    100%{ box-shadow:0 0 0 0 rgba(232,163,61,0); }
+  }
+  .panel-pulse{ animation:panelPulse 1s ease-out 1; }
+  button:disabled{ opacity:.35; cursor:not-allowed; }
+  button:disabled:hover{ border-color:var(--border); color:var(--text); }
+  .btn-full{ width:100%; margin-bottom:8px; }
+
+  .k-control{ display:flex; align-items:center; gap:8px; }
+  .k-control button{ width:34px; height:34px; padding:0; font-size:16px; font-weight:700; }
+  .k-value{
+    flex:1; text-align:center; font-family:var(--mono); font-size:22px; font-weight:700; color:var(--cyan);
+    background:var(--panel2); border:1px solid var(--border); border-radius:5px; padding:5px;
+  }
+
+  .hint{ font-size:11px; color:var(--muted); line-height:1.5; margin-top:4px; }
+  .status-line{
+    font-family:var(--mono); font-size:11.5px; color:var(--good); min-height:16px; margin-top:8px;
+  }
+
+  /* ===== Visualization ===== */
+  .viz-panel{
+    background:var(--panel); border:1px solid var(--border); border-radius:8px; overflow:hidden;
+    min-height:560px; position:relative; display:flex; flex-direction:column;
+  }
+  .viz-head{
+    display:flex; justify-content:space-between; align-items:center; padding:10px 14px;
+    border-bottom:1px solid var(--border); flex-wrap:wrap; gap:8px;
+  }
+  .viz-head .legend{ display:flex; gap:12px; flex-wrap:wrap; }
+  .legend-item{ display:flex; align-items:center; gap:5px; font-size:11.5px; color:var(--muted); font-family:var(--mono); }
+  .swatch{ width:10px; height:10px; border-radius:50%; display:inline-block; }
+  .viz-stage{ position:relative; width:100%; aspect-ratio:1/1; max-height:680px; margin:0 auto; flex:0 0 auto; }
+  #svgStage, #mapStage{ position:absolute; inset:0; width:100%; height:100%; z-index:1; }
+  #mapStage{ display:none; }
+  #svgStage{ background:
+      linear-gradient(var(--border) 1px, transparent 1px) 0 0/40px 40px,
+      linear-gradient(90deg, var(--border) 1px, transparent 1px) 0 0/40px 40px;
+      background-color:#0f131b; opacity-blend:1;
+  }
+  .empty-state{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    flex-direction:column; gap:10px; color:var(--muted); text-align:center; padding:30px;
+  }
+  .empty-state .big{ font-size:38px; }
+  .centroid-handle{ cursor:grab; }
+  .centroid-handle:active{ cursor:grabbing; }
+
+  /* ===== Right sidebar stats ===== */
+  table.stats{ width:100%; border-collapse:collapse; font-family:var(--mono); font-size:12px; }
+  table.stats th{ text-align:right; color:var(--muted); font-weight:500; padding:5px 4px; border-bottom:1px solid var(--border); font-size:10.5px; text-transform:uppercase; }
+  table.stats td{ padding:6px 4px; border-bottom:1px solid #1c212c; }
+  table.stats tr:last-child td{ border-bottom:none; }
+  .total-line{
+    display:flex; justify-content:space-between; align-items:baseline; margin-top:10px;
+    padding-top:10px; border-top:1px dashed var(--border);
+  }
+  .total-line .t-label{ font-size:12px; color:var(--muted); }
+  .total-line .t-val{ font-family:var(--mono); font-size:19px; font-weight:700; color:var(--amber); }
+
+  /* ===== Silhouette panel ===== */
+  .silhouette-panel{ grid-column:1 / -1; }
+  #silSvg{ width:100%; height:340px; display:block; }
+  .sil-summary{ display:flex; gap:24px; margin-bottom:10px; flex-wrap:wrap; }
+  .sil-metric .label{ font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; }
+  .sil-metric .val{ font-family:var(--mono); font-weight:700; font-size:18px; color:var(--cyan); }
+
+  .footer-note{ padding:10px 22px 24px; color:var(--muted); font-size:11px; text-align:center; }
+  a{ color:var(--cyan); }
+
+  /* ===== Teacher config modal ===== */
+  .teacher-modal-overlay{
+    position:fixed; inset:0; background:rgba(5,7,10,.72); backdrop-filter:blur(2px);
+    align-items:center; justify-content:center; z-index:9999; padding:20px;
+  }
+  .teacher-modal{
+    background:var(--panel); border:1px solid var(--cyan); border-radius:10px; width:min(820px,95vw);
+    max-height:88vh; overflow:auto; box-shadow:0 10px 40px rgba(0,0,0,.5);
+  }
+  .teacher-modal-head{ display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid var(--border); }
+  .teacher-modal-head h2{ margin:0; font-size:15px; }
+  .teacher-modal-body{ display:grid; grid-template-columns:1fr 1fr; gap:20px; padding:18px; }
+  @media (max-width:640px){ .teacher-modal-body{ grid-template-columns:1fr; } }
+  .tm-col h3{ font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--amber); margin:0 0 10px 0; }
+  .tm-check{ display:flex; align-items:flex-start; gap:8px; font-size:13px; margin-bottom:9px; cursor:pointer; line-height:1.4; }
+  .tm-check input{ accent-color:var(--cyan); width:15px; height:15px; margin-top:2px; flex-shrink:0; }
+  .teacher-modal-actions{ display:flex; gap:8px; flex-wrap:wrap; padding:14px 18px; border-top:1px solid var(--border); }
+  .btn-file-fake{
+    font-family:var(--sans); font-size:12.5px; font-weight:500; cursor:pointer; border-radius:5px;
+    border:1px solid var(--border); background:var(--panel2); color:var(--text); padding:9px 10px; display:inline-flex; align-items:center;
+  }
+  .btn-file-fake:hover{ border-color:var(--cyan); color:var(--cyan); }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <span class="mark">KMENAS</span>
+    <div>
+      <h1>סימולטור K-Means אינטראקטיבי</h1>
+      <div class="sub">כלי חינוכי לחקר אלגוריתם אשכולות K-Means · משתמש יחיד</div>
+    </div>
+  </div>
+  <div class="telemetry">
+    <div class="readout">
+      <div class="label">איטרציה</div>
+      <div class="val" id="iterReadout">0</div>
+    </div>
+    <div class="readout">
+      <div class="label">סה״כ מרחק (WCSS)</div>
+      <div class="val" id="wcssReadout">–</div>
+    </div>
+    <div class="trace-box"><svg id="traceSvg" viewBox="0 0 150 38" preserveAspectRatio="none"></svg></div>
+    <button class="reset-btn" id="btnReset" title="איפוס מלא של הסימולטור">⟲ איפוס</button>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- LEFT: controls -->
+  <div class="sidebar-left">
+
+    <div class="panel" id="panelScenario">
+      <h2>תרחישי לימוד</h2>
+      <label class="field">
+        <span class="lbl">בחרו שאלה מודרכת</span>
+        <select id="scenarioSelect">
+          <option value="free">— מצב חופשי (ללא תרחיש) —</option>
+        </select>
+      </label>
+      <div class="hint" id="scenarioDesc" style="display:none;"></div>
+      <button class="btn-full" id="btnScenarioRandom" style="display:none; margin-top:10px;">🎲 אתחול אקראי לתרחיש</button>
+    </div>
+
+    <div class="panel">
+      <h2>נתונים</h2>
+      <label class="field" id="ctrlFileUpload">
+        <span class="lbl">טעינת קובץ CSV</span>
+        <input type="file" id="fileInput" accept=".csv,text/csv">
+      </label>
+      <div id="datasetButtonsWrap">
+        <div class="lbl" style="margin-bottom:6px;">מאגר קבצים מובנה</div>
+        <div class="row" id="datasetButtonsRow" style="flex-wrap:wrap;"></div>
+      </div>
+      <div id="colSelectors" style="margin-top:12px; display:none;">
+        <label class="field" id="vizModeWrap" style="display:none;">
+          <span class="lbl">מצב תצוגה</span>
+          <select id="vizModeSelect">
+            <option value="map">מפת רקע (קואורדינטות)</option>
+            <option value="scatter">פיזור לפי מאפיינים</option>
+          </select>
+        </label>
+        <label class="field" id="xColWrap">
+          <span class="lbl">מאפיין X</span>
+          <select id="xColSelect"></select>
+        </label>
+        <label class="field" id="yColWrap">
+          <span class="lbl">מאפיין Y</span>
+          <select id="yColSelect"></select>
+        </label>
+      </div>
+      <div class="hint" id="dataHint">טרם נטענו נתונים. ניתן לטעון קובץ CSV עם עמודות מספריות, או להשתמש בנתוני דוגמה.</div>
+      <div class="hint" id="catalogError" style="display:none; color:var(--danger); margin-top:6px;"></div>
+    </div>
+
+    <div class="panel">
+      <h2>מודל</h2>
+      <label class="field" id="ctrlKControl">
+        <span class="lbl">מספר אשכולות (K)</span>
+        <div class="k-control">
+          <button id="kMinus">−</button>
+          <div class="k-value" id="kValue">3</div>
+          <button id="kPlus">+</button>
+        </div>
+      </label>
+      <button class="btn-full" id="btnReinit">אתחול צנטרואידים מחדש</button>
+      <div class="hint">גרירת צנטרואיד באופן ידני מפעילה שיוך מחדש של הנקודות, ללא הזזה אוטומטית של המרכז.</div>
+    </div>
+
+    <div class="panel">
+      <h2>הרצת אנימציה</h2>
+      <div class="row" style="margin-bottom:10px;" id="ctrlRunButtons">
+        <button class="primary" id="btnPlay">▶ הפעל</button>
+        <button id="btnStep">צעד בודד ⏭</button>
+      </div>
+      <label class="field" id="ctrlSpeedControl">
+        <span class="lbl">מהירות אנימציה: <span id="speedLabel">600ms</span></span>
+        <input type="range" id="speedRange" min="80" max="1600" step="20" value="600">
+      </label>
+      <div class="status-line" id="statusLine"></div>
+    </div>
+
+    <div class="panel">
+      <h2>תצוגה וחריגים</h2>
+      <button class="btn-full toggle" id="btnLines">הצג קווי מרחק לצנטרואיד</button>
+      <button class="btn-full toggle" id="btnMinMax" title="נרמול Min-Max להפחתת השפעת חריגים">נרמול Min-Max (טיפול בחריגים)</button>
+      <button class="btn-full toggle" id="btnSilhouette">הצג ניתוח סילואט</button>
+    </div>
+
+  </div>
+
+  <!-- CENTER: visualization -->
+  <div class="viz-panel">
+    <div class="viz-head">
+      <div class="legend" id="legendBox"></div>
+      <div class="hint" id="modeHint" style="margin:0;"></div>
+    </div>
+    <div class="viz-stage">
+      <svg id="svgStage" viewBox="0 0 700 700" preserveAspectRatio="xMidYMid meet"></svg>
+      <div id="mapStage"></div>
+      <div class="empty-state" id="emptyState">
+        <div class="big">◎</div>
+        <div>אין עדיין נתונים להצגה</div>
+        <div class="hint">טענו קובץ CSV או השתמשו באחד מסטי הדוגמה בפאנל השמאלי</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: stats -->
+  <div class="sidebar-right">
+    <div class="panel">
+      <h2>סטטיסטיקת אשכולות</h2>
+      <table class="stats">
+        <thead><tr><th>#</th><th>נקודות</th><th>סכום מרחק</th><th>ממוצע</th></tr></thead>
+        <tbody id="statsBody"></tbody>
+      </table>
+      <div class="total-line">
+        <span class="t-label">סה״כ סכום מרחקים</span>
+        <span class="t-val" id="totalSum">–</span>
+      </div>
+    </div>
+    <div class="panel" id="panelAbout">
+      <h2>אודות המודל</h2>
+      <div class="hint">
+        K-Means משייך כל נקודה לצנטרואיד הקרוב אליה, ולאחר מכן מזיז כל צנטרואיד לממוצע הנקודות המשויכות אליו.
+        חזרה על התהליך מובילה להתכנסות. נסו לגרור צנטרואיד ידנית ולבחון כיצד השיוך משתנה, או הפעילו נרמול
+        Min-Max כדי לראות כיצד חריגים משפיעים על החלוקה.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="layout" id="silhouetteRow" style="display:none;">
+  <div class="panel silhouette-panel">
+    <h2>ניתוח סילואט (Silhouette)</h2>
+    <div class="sil-summary">
+      <div class="sil-metric"><div class="label">ציון סילואט ממוצע כללי</div><div class="val" id="silAvg">–</div></div>
+      <div class="sil-metric"><div class="label">איכות חלוקה</div><div class="val" id="silQuality">–</div></div>
+    </div>
+    <svg id="silSvg" viewBox="0 0 900 340" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="hint">כל פס מייצג נקודה בודדת; אורכו הוא ציון הסילואט s(i) שלה (בין 1- ל-1). נקודות מקובצות לפי אשכול וממוינות
+      מהגבוה לנמוך. הקו האנכי מסמן את ממוצע הסילואט הכללי.</div>
+  </div>
+</div>
+
+<div class="footer-note">KMENAS · סימולטור לימודי לאלגוריתם K-Means · הנתונים נשארים בדפדפן בלבד ואינם נשלחים לשום שרת ·
+  לחצו Ctrl+C ואז Ctrl+M לפתיחת מצב הגדרות מורה <button id="btnTeacherFallback" class="small" style="opacity:.35; padding:2px 7px; font-size:10px; margin-right:6px;" title="פתיחת מצב מורה (למקרה שקיצור המקלדת אינו נקלט)">🎓</button>
+</div>
+
+<div class="teacher-modal-overlay" id="teacherModal" style="display:none;">
+  <div class="teacher-modal">
+    <div class="teacher-modal-head">
+      <h2>🎓 מצב הגדרות מורה</h2>
+      <button class="small" id="btnCloseTeacher">✕ סגור</button>
+    </div>
+    <div class="teacher-modal-body">
+      <div class="tm-col">
+        <h3>אלמנטים גלויים לתלמיד</h3>
+        <label class="tm-check"><input type="checkbox" data-vis="scenarioPanel"> פאנל תרחישי לימוד</label>
+        <label class="tm-check"><input type="checkbox" data-vis="fileUpload"> טעינת קובץ CSV</label>
+        <label class="tm-check"><input type="checkbox" data-vis="datasetLibraryUI"> כפתורי מאגר נתונים</label>
+        <label class="tm-check"><input type="checkbox" data-vis="columnSelectors"> בחירת עמודות / מצב תצוגה</label>
+        <label class="tm-check"><input type="checkbox" data-vis="kControl"> שליטה ב-K</label>
+        <label class="tm-check"><input type="checkbox" data-vis="reinitButton"> כפתור אתחול צנטרואידים</label>
+        <label class="tm-check"><input type="checkbox" data-vis="runButtons"> הפעלה / צעד בודד</label>
+        <label class="tm-check"><input type="checkbox" data-vis="speedControl"> מהירות אנימציה</label>
+        <label class="tm-check"><input type="checkbox" data-vis="linesToggle"> קווי מרחק לצנטרואיד</label>
+        <label class="tm-check"><input type="checkbox" data-vis="minmaxToggle"> נרמול Min-Max</label>
+        <label class="tm-check"><input type="checkbox" data-vis="silhouetteToggle"> ניתוח סילואט</label>
+        <label class="tm-check"><input type="checkbox" data-vis="aboutPanel"> פאנל "אודות המודל"</label>
+        <label class="tm-check"><input type="checkbox" data-vis="resetButton"> כפתור איפוס</label>
+      </div>
+      <div class="tm-col">
+        <h3>מאגר קבצים מובנה — זמין לתלמיד</h3>
+        <div id="tmLibraryList"></div>
+        <div class="hint" style="margin-top:10px;">בחרו אילו סטים מוכנים יופיעו לתלמיד בפאנל הנתונים. קובץ CSV אישי עדיין ניתן לטעינה אם "טעינת קובץ CSV" מסומן.</div>
+      </div>
+    </div>
+    <div class="teacher-modal-actions">
+      <button class="primary" id="btnTeacherApply">✓ החל וסגור</button>
+      <button id="btnTeacherExport">⭳ ייצוא קונפיגורציה</button>
+      <label class="btn-file-fake" for="teacherImportInput">⭱ ייבוא קונפיגורציה</label>
+      <input type="file" id="teacherImportInput" accept="application/json" style="display:none;">
+      <button id="btnTeacherReset">↺ ברירת מחדל</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+
+const PALETTE = ['#4fd6c4','#e8a33d','#d16bd1','#7fd858','#5b8def','#f26d6d','#c9d14f','#b98ce8','#5bc0de','#e85b8a'];
+
+const state = {
+  headers: [], rows: [], numericCols: [], latCol:null, lonCol:null,
+  xCol:null, yCol:null, vizMode:'scatter', geoAvailable:false,
+  points: [], k:3, centroids: [], running:false, timer:null, speed:600,
+  showLines:false, showSilhouette:false, minmax:false,
+  domain:{xmin:0,xmax:1,ymin:0,ymax:1},
+  origDomain:{xmin:0,xmax:1,ymin:0,ymax:1},
+  iteration:0, wcssHistory:[], converged:false,
+  map:null, mapMarkers:[], mapCentroidMarkers:[], mapLines:[],
+  dragging:null
+};
+
+const $ = id => document.getElementById(id);
+
+// ---------------- CSV parsing ----------------
+function parseCSV(text){
+  const delim = (text.split('\n')[0].split(';').length > text.split('\n')[0].split(',').length) ? ';' : ',';
+  const lines = text.replace(/\r/g,'').split('\n').filter(l=>l.trim().length>0);
+  const headers = lines[0].split(delim).map(h=>h.trim());
+  const rows = lines.slice(1).map(line=>{
+    const cells = line.split(delim);
+    const obj = {};
+    headers.forEach((h,i)=>{ obj[h] = (cells[i]!==undefined? cells[i].trim() : ''); });
+    return obj;
+  });
+  return {headers, rows};
+}
+
+function detectColumns(headers, rows){
+  const numeric = [];
+  headers.forEach(h=>{
+    let ok = true, count=0;
+    for(const r of rows){
+      const v = r[h];
+      if(v==='' || v===undefined) continue;
+      if(isNaN(parseFloat(v))){ ok=false; break; }
+      count++;
+    }
+    if(ok && count>0) numeric.push(h);
+  });
+  const findCol = (regexes) => headers.find(h => regexes.some(re=>re.test(h)));
+  const latCol = findCol([/^lat(itude)?$/i, /^y$/i, /קו.?רוחב/]);
+  const lonCol = findCol([/^lon(g|gitude)?$/i, /^lng$/i, /^x$/i, /קו.?אורך/]);
+  return { numeric, latCol: (numeric.includes(latCol)?latCol:null), lonCol: (numeric.includes(lonCol)?lonCol:null) };
+}
+
+function loadDataset(headers, rows){
+  const det = detectColumns(headers, rows);
+  state.headers = headers; state.rows = rows; state.numericCols = det.numeric;
+  state.latCol = det.latCol; state.lonCol = det.lonCol;
+  state.geoAvailable = !!(det.latCol && det.lonCol);
+  state.vizMode = state.geoAvailable ? 'map' : 'scatter';
+  state._mapFitted = false; // force the map to re-center/zoom on the newly loaded data
+  const nonGeoNumeric = det.numeric.filter(c=>c!==det.latCol && c!==det.lonCol);
+  state.xCol = nonGeoNumeric[0] || det.numeric[0] || null;
+  state.yCol = nonGeoNumeric[1] || det.numeric[1] || det.numeric[0] || null;
+  populateColumnUI();
+  rebuildPoints();
+  resetModel(true);
+  $('emptyState').style.display = 'none';
+  $('dataHint').textContent = `נטענו ${rows.length} רשומות · ${det.numeric.length} עמודות מספריות` +
+    (state.geoAvailable ? ' · זוהו קואורדינטות גיאוגרפיות' : '');
+}
+
+function populateColumnUI(){
+  $('colSelectors').style.display = teacherConfig.visible.columnSelectors ? 'block' : 'none';
+  $('vizModeWrap').style.display = state.geoAvailable ? 'block' : 'none';
+  $('vizModeSelect').value = state.vizMode;
+  const fill = (sel, cols, val) => {
+    sel.innerHTML = '';
+    cols.forEach(c=>{
+      const o = document.createElement('option'); o.value=c; o.textContent=c;
+      if(c===val) o.selected = true;
+      sel.appendChild(o);
+    });
+  };
+  fill($('xColSelect'), state.numericCols, state.xCol);
+  fill($('yColSelect'), state.numericCols, state.yCol);
+  const scatterOnly = state.vizMode === 'scatter';
+  $('xColWrap').style.display = scatterOnly ? 'block':'none';
+  $('yColWrap').style.display = scatterOnly ? 'block':'none';
+  $('btnMinMax').disabled = !scatterOnly;
+  updateModeHint();
+}
+
+function updateModeHint(){
+  $('modeHint').textContent = state.vizMode==='map'
+    ? `אשכול במרחב הגיאוגרפי (${state.lonCol} / ${state.latCol})`
+    : (state.xCol ? `אשכול לפי: ${state.xCol} × ${state.yCol}` : '');
+}
+
+// ---------------- Build feature points ----------------
+function rebuildPoints(){
+  let xCol, yCol, isMap = (state.vizMode==='map' && state.geoAvailable);
+  if(isMap){ xCol = state.lonCol; yCol = state.latCol; } else { xCol = state.xCol; yCol = state.yCol; }
+  if(!xCol || !yCol){ state.points = []; return; }
+  const pts = [];
+  state.rows.forEach((r,i)=>{
+    const xv = parseFloat(r[xCol]), yv = parseFloat(r[yCol]);
+    if(isNaN(xv) || isNaN(yv)) return;
+    pts.push({ id:i, ox:xv, oy:yv, x:xv, y:yv, cluster:-1, row:r });
+  });
+  state.points = pts;
+  computeOrigDomain();
+  state.minmax = false; $('btnMinMax').classList.remove('on');
+  computeDomain();
+}
+
+function computeOrigDomain(){
+  if(state.points.length===0) return;
+  let xmin=Infinity,xmax=-Infinity,ymin=Infinity,ymax=-Infinity;
+  state.points.forEach(p=>{ xmin=Math.min(xmin,p.ox); xmax=Math.max(xmax,p.ox); ymin=Math.min(ymin,p.oy); ymax=Math.max(ymax,p.oy); });
+  if(xmin===xmax){ xmin-=1; xmax+=1; } if(ymin===ymax){ ymin-=1; ymax+=1; }
+  state.origDomain = {xmin,xmax,ymin,ymax};
+}
+
+function applyMinMaxTransform(on){
+  const d = state.origDomain;
+  state.points.forEach(p=>{
+    if(on){ p.x = (p.x_raw_set? p.x : (p.ox - d.xmin)/(d.xmax-d.xmin)); p.y = (p.oy - d.ymin)/(d.ymax-d.ymin); p.x=(p.ox-d.xmin)/(d.xmax-d.xmin); }
+    else { p.x = p.ox; p.y = p.oy; }
+  });
+  // transform centroids consistently (linear map, invertible)
+  state.centroids.forEach(c=>{
+    if(on){ c.x = (c.x - d.xmin)/(d.xmax-d.xmin); c.y = (c.y - d.ymin)/(d.ymax-d.ymin); }
+    else { c.x = c.x*(d.xmax-d.xmin)+d.xmin; c.y = c.y*(d.ymax-d.ymin)+d.ymin; }
+  });
+  computeDomain();
+}
+
+function computeDomain(){
+  if(state.points.length===0) return;
+  let xmin=Infinity,xmax=-Infinity,ymin=Infinity,ymax=-Infinity;
+  state.points.forEach(p=>{ xmin=Math.min(xmin,p.x); xmax=Math.max(xmax,p.x); ymin=Math.min(ymin,p.y); ymax=Math.max(ymax,p.y); });
+  if(xmin===xmax){ xmin-=1; xmax+=1; } if(ymin===ymax){ ymin-=1; ymax+=1; }
+  const px=(xmax-xmin)*0.12 || 1, py=(ymax-ymin)*0.12 || 1;
+  state.domain = { xmin:xmin-px, xmax:xmax+px, ymin:ymin-py, ymax:ymax+py };
+}
+
+// ---------------- K-Means core ----------------
+function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+function initCentroids(){
+  if(state.points.length===0){ state.centroids=[]; return; }
+  const shuffled = [...state.points].sort(()=>Math.random()-0.5);
+  const chosen = [];
+  for(let i=0;i<state.k;i++){ const p = shuffled[i % shuffled.length]; chosen.push({x:p.x, y:p.y}); }
+  state.centroids = chosen;
+}
+
+function assign(){
+  let changed = false;
+  state.points.forEach(p=>{
+    let best=-1, bd=Infinity;
+    state.centroids.forEach((c,ci)=>{ const d=dist(p,c); if(d<bd){bd=d; best=ci;} });
+    if(p.cluster!==best) changed = true;
+    p.cluster = best;
+  });
+  return changed;
+}
+
+function updateCentroids(){
+  const sums = state.centroids.map(()=>({x:0,y:0,n:0}));
+  state.points.forEach(p=>{ if(p.cluster>=0){ sums[p.cluster].x+=p.x; sums[p.cluster].y+=p.y; sums[p.cluster].n++; } });
+  sums.forEach((s,i)=>{
+    if(s.n>0){ state.centroids[i].x = s.x/s.n; state.centroids[i].y = s.y/s.n; }
+    else { const rp = state.points[Math.floor(Math.random()*state.points.length)]; if(rp){ state.centroids[i].x=rp.x; state.centroids[i].y=rp.y; } }
+  });
+}
+
+function computeStats(){
+  const sums = state.centroids.map(()=>({sum:0,n:0}));
+  state.points.forEach(p=>{ if(p.cluster>=0){ sums[p.cluster].sum += dist(p, state.centroids[p.cluster]); sums[p.cluster].n++; } });
+  const total = sums.reduce((a,s)=>a+s.sum,0);
+  return {sums, total};
+}
+
+function stepOnce(){
+  if(state.points.length===0 || state.centroids.length===0) return;
+  const changed = assign();
+  updateCentroids();
+  assign();
+  state.iteration++;
+  const stats = computeStats();
+  state.wcssHistory.push(stats.total);
+  if(state.wcssHistory.length>60) state.wcssHistory.shift();
+  state.converged = !changed;
+  render();
+  if(state.converged && state.running){ toggleRun(false); setStatus(`התכנסות הושגה באיטרציה ${state.iteration} ✓`); }
+}
+
+function resetModel(freshInit){
+  if(freshInit){ initCentroids(); }
+  state.iteration = 0; state.wcssHistory = []; state.converged=false;
+  assign();
+  const stats = computeStats();
+  state.wcssHistory.push(stats.total);
+  render();
+  setStatus('');
+}
+
+function toggleRun(force){
+  state.running = (force!==undefined) ? force : !state.running;
+  $('btnPlay').textContent = state.running ? '⏸ השהה' : '▶ הפעל';
+  $('btnPlay').classList.toggle('primary', !state.running);
+  if(state.running){
+    clearInterval(state.timer);
+    state.timer = setInterval(()=>{ if(!state.converged) stepOnce(); }, state.speed);
+    setStatus('אנימציה פועלת…');
+  } else {
+    clearInterval(state.timer);
+  }
+}
+
+function setStatus(t){ $('statusLine').textContent = t; }
+
+// ---------------- Silhouette ----------------
+function computeSilhouette(){
+  const pts = state.points;
+  const n = pts.length;
+  if(n===0 || state.k<2) return null;
+  const byCluster = {};
+  pts.forEach(p=>{ (byCluster[p.cluster] = byCluster[p.cluster]||[]).push(p); });
+  const scores = pts.map(p=>{
+    const same = byCluster[p.cluster] || [];
+    let a = 0;
+    if(same.length>1){ let s=0; same.forEach(q=>{ if(q!==p) s+=dist(p,q); }); a = s/(same.length-1); }
+    let b = Infinity;
+    Object.keys(byCluster).forEach(ci=>{
+      if(+ci===p.cluster) return;
+      const grp = byCluster[ci]; if(!grp.length) return;
+      let s=0; grp.forEach(q=>s+=dist(p,q));
+      b = Math.min(b, s/grp.length);
+    });
+    if(!isFinite(b)) b = 0;
+    const s = (Math.max(a,b)===0) ? 0 : (b-a)/Math.max(a,b);
+    return { p, s, cluster:p.cluster };
+  });
+  const avg = scores.reduce((acc,o)=>acc+o.s,0)/n;
+  return { scores, avg };
+}
+
+// ---------------- Rendering: SVG scatter ----------------
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function sx(v){ const d=state.domain; return 60 + (v-d.xmin)/(d.xmax-d.xmin)*580; }
+function sy(v){ const d=state.domain; return 640 - (v-d.ymin)/(d.ymax-d.ymin)*580; }
+function isx(px){ const d=state.domain; return d.xmin + (px-60)/580*(d.xmax-d.xmin); }
+function isy(py){ const d=state.domain; return d.ymin + (640-py)/580*(d.ymax-d.ymin); }
+
+function renderSVG(){
+  const svg = $('svgStage');
+  svg.innerHTML = '';
+  if(state.showLines){
+    state.points.forEach(p=>{
+      if(p.cluster<0) return;
+      const c = state.centroids[p.cluster];
+      const line = document.createElementNS(SVG_NS,'line');
+      line.setAttribute('x1', sx(p.x)); line.setAttribute('y1', sy(p.y));
+      line.setAttribute('x2', sx(c.x)); line.setAttribute('y2', sy(c.y));
+      line.setAttribute('stroke', PALETTE[p.cluster % PALETTE.length]);
+      line.setAttribute('stroke-opacity','0.6'); line.setAttribute('stroke-width','1.8');
+      svg.appendChild(line);
+    });
+  }
+  state.points.forEach(p=>{
+    const c = document.createElementNS(SVG_NS,'circle');
+    c.setAttribute('cx', sx(p.x)); c.setAttribute('cy', sy(p.y)); c.setAttribute('r','4.2');
+    c.setAttribute('fill', p.cluster>=0 ? PALETTE[p.cluster % PALETTE.length] : '#5a6478');
+    c.setAttribute('fill-opacity','0.85'); c.setAttribute('stroke','#0d1016'); c.setAttribute('stroke-width','0.6');
+    svg.appendChild(c);
+  });
+  state.centroids.forEach((c,ci)=>{
+    const g = document.createElementNS(SVG_NS,'g');
+    g.setAttribute('class','centroid-handle'); g.dataset.ci = ci;
+    const halo = document.createElementNS(SVG_NS,'circle');
+    halo.setAttribute('cx', sx(c.x)); halo.setAttribute('cy', sy(c.y)); halo.setAttribute('r','13');
+    halo.setAttribute('fill', PALETTE[ci % PALETTE.length]); halo.setAttribute('fill-opacity','0.18');
+    const cross1 = document.createElementNS(SVG_NS,'line');
+    cross1.setAttribute('x1', sx(c.x)-8); cross1.setAttribute('y1', sy(c.y));
+    cross1.setAttribute('x2', sx(c.x)+8); cross1.setAttribute('y2', sy(c.y));
+    const cross2 = document.createElementNS(SVG_NS,'line');
+    cross2.setAttribute('x1', sx(c.x)); cross2.setAttribute('y1', sy(c.y)-8);
+    cross2.setAttribute('x2', sx(c.x)); cross2.setAttribute('y2', sy(c.y)+8);
+    [cross1,cross2].forEach(l=>{ l.setAttribute('stroke','#0d1016'); l.setAttribute('stroke-width','2.4'); });
+    const dot = document.createElementNS(SVG_NS,'circle');
+    dot.setAttribute('cx', sx(c.x)); dot.setAttribute('cy', sy(c.y)); dot.setAttribute('r','7');
+    dot.setAttribute('fill', PALETTE[ci % PALETTE.length]); dot.setAttribute('stroke','#fff'); dot.setAttribute('stroke-width','1.6');
+    g.appendChild(halo); g.appendChild(dot); g.appendChild(cross1); g.appendChild(cross2);
+    svg.appendChild(g);
+    attachDrag(g, ci);
+  });
+}
+
+function attachDrag(el, ci){
+  el.addEventListener('pointerdown', ev=>{
+    ev.preventDefault();
+    state.dragging = ci;
+    toggleRun(false);
+    el.setPointerCapture(ev.pointerId);
+  });
+  el.addEventListener('pointermove', ev=>{
+    if(state.dragging!==ci) return;
+    const svg = $('svgStage');
+    const rect = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    const px = (ev.clientX-rect.left)/rect.width*vb.width;
+    const py = (ev.clientY-rect.top)/rect.height*vb.height;
+    const clampedPx = Math.max(-60, Math.min(760, px));
+    const clampedPy = Math.max(-60, Math.min(760, py));
+    state.centroids[ci].x = isx(clampedPx);
+    state.centroids[ci].y = isy(clampedPy);
+    assign();
+    render(true);
+  });
+  el.addEventListener('pointerup', ev=>{ state.dragging=null; setStatus('צנטרואיד הוזז ידנית — הנקודות שויכו מחדש.'); });
+}
+
+// ---------------- Map (Leaflet) ----------------
+function ensureMap(){
+  if(state.map) return;
+  state.map = L.map('mapStage', {zoomControl:true}).setView([31.5,34.9], 8);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution:'&copy; OpenStreetMap contributors', maxZoom:18
+  }).addTo(state.map);
+}
+
+function coloredIcon(color, big){
+  return L.divIcon({
+    className:'',
+    html:`<div style="width:${big?22:11}px;height:${big?22:11}px;border-radius:50%;background:${color};border:${big?'3px solid #fff':'1.5px solid #0d1016'};box-shadow:0 0 4px rgba(0,0,0,.5);"></div>`,
+    iconSize:[big?22:11, big?22:11], iconAnchor:[big?11:5.5, big?11:5.5]
+  });
+}
+
+function renderMap(){
+  ensureMap();
+  state.mapMarkers.forEach(m=>state.map.removeLayer(m)); state.mapMarkers=[];
+  state.mapCentroidMarkers.forEach(m=>state.map.removeLayer(m)); state.mapCentroidMarkers=[];
+  state.mapLines.forEach(m=>state.map.removeLayer(m)); state.mapLines=[];
+
+  const bounds = [];
+  state.points.forEach(p=>{
+    const color = p.cluster>=0 ? PALETTE[p.cluster % PALETTE.length] : '#5a6478';
+    const m = L.marker([p.y, p.x], {icon: coloredIcon(color,false), interactive:false}).addTo(state.map);
+    m._colorCluster = p.cluster;
+    state.mapMarkers.push(m);
+    bounds.push([p.y,p.x]);
+  });
+  if(state.showLines){
+    state.points.forEach(p=>{
+      if(p.cluster<0) return;
+      const c = state.centroids[p.cluster];
+      const line = L.polyline([[p.y,p.x],[c.y,c.x]], {color: PALETTE[p.cluster % PALETTE.length], weight:2.4, opacity:0.65}).addTo(state.map);
+      state.mapLines.push(line);
+    });
+  }
+  state.centroids.forEach((c,ci)=>{
+    const m = L.marker([c.y, c.x], {icon: coloredIcon(PALETTE[ci % PALETTE.length], true), draggable:true}).addTo(state.map);
+    m.on('dragstart', ()=>{ toggleRun(false); });
+    m.on('drag', e=>{ const ll = e.target.getLatLng(); c.x = ll.lng; c.y = ll.lat; assign(); updateMapDynamic(); });
+    m.on('dragend', ()=>{ setStatus('צנטרואיד הוזז ידנית — הנקודות שויכו מחדש.'); render(); });
+    state.mapCentroidMarkers.push(m);
+  });
+  if(!state._mapFitted && bounds.length){ state.map.fitBounds(bounds, {padding:[30,30]}); state._mapFitted = true; }
+  setTimeout(()=>{ if(state.map) state.map.invalidateSize(); }, 50);
+}
+
+// Lightweight update used while dragging a centroid on the map: keeps the
+// dragged marker instance intact (so the drag gesture isn't interrupted)
+// while making the connecting lines and point colors follow it live.
+function updateMapDynamic(){
+  if(!state.map) return;
+  state.points.forEach((p,i)=>{
+    const marker = state.mapMarkers[i];
+    if(marker && marker._colorCluster !== p.cluster){
+      const color = p.cluster>=0 ? PALETTE[p.cluster % PALETTE.length] : '#5a6478';
+      marker.setIcon(coloredIcon(color,false));
+      marker._colorCluster = p.cluster;
+    }
+  });
+  state.mapLines.forEach(m=>state.map.removeLayer(m)); state.mapLines=[];
+  if(state.showLines){
+    state.points.forEach(p=>{
+      if(p.cluster<0) return;
+      const c = state.centroids[p.cluster];
+      const line = L.polyline([[p.y,p.x],[c.y,c.x]], {color: PALETTE[p.cluster % PALETTE.length], weight:2.4, opacity:0.65}).addTo(state.map);
+      state.mapLines.push(line);
+    });
+  }
+  renderStatsOnly();
+}
+
+// ---------------- Legend / stats / telemetry ----------------
+function renderLegend(){
+  const box = $('legendBox'); box.innerHTML='';
+  const counts = state.centroids.map(()=>0);
+  state.points.forEach(p=>{ if(p.cluster>=0) counts[p.cluster]++; });
+  state.centroids.forEach((c,ci)=>{
+    const div = document.createElement('div'); div.className='legend-item';
+    div.innerHTML = `<span class="swatch" style="background:${PALETTE[ci%PALETTE.length]}"></span> אשכול ${ci+1} · ${counts[ci]}`;
+    box.appendChild(div);
+  });
+}
+
+function renderStatsTable(){
+  const stats = computeStats();
+  const body = $('statsBody'); body.innerHTML='';
+  stats.sums.forEach((s,ci)=>{
+    const tr = document.createElement('tr');
+    const avg = s.n>0 ? (s.sum/s.n) : 0;
+    tr.innerHTML = `<td><span class="swatch cluster-color" style="background:${PALETTE[ci%PALETTE.length]}"></span> ${ci+1}</td>
+      <td>${s.n}</td><td>${s.sum.toFixed(2)}</td><td>${avg.toFixed(2)}</td>`;
+    body.appendChild(tr);
+  });
+  $('totalSum').textContent = stats.total.toFixed(2);
+  $('wcssReadout').textContent = stats.total.toFixed(1);
+  $('iterReadout').textContent = state.iteration;
+}
+
+function renderStatsOnly(){ renderStatsTable(); renderLegend(); }
+
+function renderTrace(){
+  const svg = $('traceSvg'); svg.innerHTML='';
+  const h = state.wcssHistory;
+  if(h.length<2){ return; }
+  const max = Math.max(...h), min = Math.min(...h);
+  const range = (max-min) || 1;
+  const pts = h.map((v,i)=>{
+    const x = (i/(h.length-1))*146+2;
+    const y = 34 - ((v-min)/range)*30 - 2;
+    return `${x},${y}`;
+  }).join(' ');
+  const poly = document.createElementNS(SVG_NS,'polyline');
+  poly.setAttribute('points', pts); poly.setAttribute('fill','none');
+  poly.setAttribute('stroke', '#4fd6c4'); poly.setAttribute('stroke-width','1.6');
+  svg.appendChild(poly);
+}
+
+// ---------------- Silhouette rendering ----------------
+function renderSilhouette(){
+  const svg = $('silSvg'); svg.innerHTML='';
+  const result = computeSilhouette();
+  if(!result){ $('silAvg').textContent='–'; $('silQuality').textContent='–'; return; }
+  const { scores, avg } = result;
+  $('silAvg').textContent = avg.toFixed(3);
+  let quality = 'חלשה'; if(avg>0.7) quality='מצוינת'; else if(avg>0.5) quality='טובה'; else if(avg>0.25) quality='סבירה';
+  $('silQuality').textContent = quality;
+
+  const grouped = {};
+  scores.forEach(o=>{ (grouped[o.cluster]=grouped[o.cluster]||[]).push(o); });
+  const order = Object.keys(grouped).sort((a,b)=>a-b);
+  order.forEach(k=>grouped[k].sort((a,b)=>b.s-a.s));
+
+  const W=900,H=340, left=70, right=30, top=14, bottom=34;
+  const plotW = W-left-right, plotH = H-top-bottom;
+  const n = scores.length;
+  const gap = 2;
+  const barH = Math.max(1, (plotH - order.length*6) / n);
+  const xScale = v => left + ((v+1)/2) * plotW;
+
+  // zero line
+  const zero = document.createElementNS(SVG_NS,'line');
+  zero.setAttribute('x1', xScale(0)); zero.setAttribute('x2', xScale(0));
+  zero.setAttribute('y1', top); zero.setAttribute('y2', H-bottom);
+  zero.setAttribute('stroke', '#3a4152'); zero.setAttribute('stroke-width','1');
+  svg.appendChild(zero);
+
+  let y = top;
+  order.forEach(k=>{
+    grouped[k].forEach(o=>{
+      const rect = document.createElementNS(SVG_NS,'rect');
+      const x0 = Math.min(xScale(0), xScale(o.s)), w = Math.abs(xScale(o.s)-xScale(0));
+      rect.setAttribute('x', x0); rect.setAttribute('y', y);
+      rect.setAttribute('width', Math.max(w,0.5)); rect.setAttribute('height', Math.max(barH-gap,0.6));
+      rect.setAttribute('fill', PALETTE[k % PALETTE.length]); rect.setAttribute('fill-opacity','0.85');
+      svg.appendChild(rect);
+      y += barH;
+    });
+    y += 6;
+  });
+
+  // average line
+  const avgLine = document.createElementNS(SVG_NS,'line');
+  avgLine.setAttribute('x1', xScale(avg)); avgLine.setAttribute('x2', xScale(avg));
+  avgLine.setAttribute('y1', top); avgLine.setAttribute('y2', H-bottom);
+  avgLine.setAttribute('stroke', '#e8a33d'); avgLine.setAttribute('stroke-width','2'); avgLine.setAttribute('stroke-dasharray','4,3');
+  svg.appendChild(avgLine);
+
+  // axis labels
+  [-1,-0.5,0,0.5,1].forEach(v=>{
+    const t = document.createElementNS(SVG_NS,'text');
+    t.setAttribute('x', xScale(v)); t.setAttribute('y', H-bottom+18);
+    t.setAttribute('fill', '#8a94a6'); t.setAttribute('font-size','11'); t.setAttribute('text-anchor','middle');
+    t.setAttribute('font-family','Roboto Mono, monospace');
+    t.textContent = v.toFixed(1);
+    svg.appendChild(t);
+  });
+}
+
+// ---------------- Master render ----------------
+function render(skipStats){
+  if(state.points.length===0){ $('emptyState').style.display='flex'; return; }
+  $('emptyState').style.display='none';
+  const isMap = (state.vizMode==='map' && state.geoAvailable);
+  $('svgStage').style.display = isMap ? 'none':'block';
+  $('mapStage').style.display = isMap ? 'block':'none';
+  if(isMap) renderMap(); else renderSVG();
+  if(!skipStats){ renderStatsTable(); renderLegend(); renderTrace(); }
+  else { renderLegend(); }
+  if(state.showSilhouette) renderSilhouette();
+}
+
+// ---------------- Catalog (fetched from catalog.json + /data/*.csv) ----------------
+// Replaces the old in-browser random data generators: datasets and guided scenarios
+// now ship as real files alongside index.html and load automatically via fetch(),
+// so the whole thing works out of the box once deployed (e.g. on GitHub Pages).
+// NOTE: fetch() of local files is blocked by browsers when opened as file:// —
+// serve via any static http server (or GitHub Pages) for this to work.
+let CATALOG = { datasets: [], scenarios: [] };
+
+async function loadCatalog(){
+  try{
+    const res = await fetch('catalog.json');
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    CATALOG = await res.json();
+  }catch(err){
+    $('catalogError').style.display = 'block';
+    $('catalogError').textContent = 'לא ניתן לטעון את catalog.json. אם פתחתם את הקובץ ישירות מהדיסק, הריצו שרת מקומי (למשל: python -m http.server) או פרסמו ב-GitHub Pages — טעינת קבצים אוטומטית דורשת שרת http.';
+    CATALOG = { datasets: [], scenarios: [] };
+  }
+  // scenario dropdown
+  CATALOG.scenarios.forEach(sc=>{
+    const o = document.createElement('option'); o.value = sc.id; o.textContent = sc.title;
+    $('scenarioSelect').appendChild(o);
+  });
+  // teacher config: default every catalog dataset to "visible" the first time it's seen
+  CATALOG.datasets.forEach(ds=>{ if(!(ds.id in teacherConfig.library)) teacherConfig.library[ds.id] = true; });
+}
+
+function findDataset(id){ return CATALOG.datasets.find(d=>d.id===id); }
+
+async function loadDatasetById(id){
+  const ds = findDataset(id);
+  if(!ds){ setStatus('סט הנתונים לא נמצא בקטלוג.'); return; }
+  setStatus(`טוען ${ds.name}…`);
+  try{
+    const res = await fetch(ds.file);
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const text = await res.text();
+    const {headers, rows} = parseCSV(text);
+    loadDataset(headers, rows);
+    setStatus('');
+  }catch(err){
+    setStatus(`שגיאה בטעינת ${ds.file}. ודאו שהאתר מוגש משרת http ושהקובץ קיים.`);
+  }
+}
+
+async function applyScenario(id){
+  if(id==='free'){
+    $('scenarioDesc').style.display = 'none';
+    $('btnScenarioRandom').style.display = 'none';
+    return;
+  }
+  const sc = CATALOG.scenarios.find(s=>s.id===id);
+  if(!sc) return;
+  await loadDatasetById(sc.dataset);
+  state.k = sc.defaultK != null ? sc.defaultK : state.k;
+  $('kValue').textContent = state.k;
+  resetModel(true);
+  if(sc.defaultShowLines != null) setShowLines(!!sc.defaultShowLines);
+  if(sc.defaultMinMax != null) setMinMax(!!sc.defaultMinMax);
+  $('scenarioDesc').textContent = sc.description;
+  $('scenarioDesc').style.display = 'block';
+  $('btnScenarioRandom').style.display = 'block';
+  setStatus(`נטען תרחיש: ${sc.title}`);
+}
+
+// ---------------- Teacher configuration (Ctrl+C+M) ----------------
+const teacherConfig = {
+  visible: {
+    scenarioPanel:true, fileUpload:true, datasetLibraryUI:true, columnSelectors:true,
+    kControl:true, reinitButton:true, runButtons:true, speedControl:true,
+    linesToggle:true, minmaxToggle:true, silhouetteToggle:true, aboutPanel:true, resetButton:true
+  },
+  library: {}
+};
+
+const VIS_TARGETS = {
+  scenarioPanel:'panelScenario', fileUpload:'ctrlFileUpload', datasetLibraryUI:'datasetButtonsWrap',
+  kControl:'ctrlKControl', reinitButton:'btnReinit', runButtons:'ctrlRunButtons',
+  speedControl:'ctrlSpeedControl', linesToggle:'btnLines', minmaxToggle:'btnMinMax',
+  silhouetteToggle:'btnSilhouette', aboutPanel:'panelAbout', resetButton:'btnReset'
+};
+
+function renderDatasetButtons(){
+  const row = $('datasetButtonsRow'); if(!row) return;
+  row.innerHTML = '';
+  CATALOG.datasets.forEach(ds=>{
+    if(!teacherConfig.library[ds.id]) return;
+    const b = document.createElement('button');
+    b.className = 'small'; b.title = ds.desc; b.textContent = ds.name;
+    b.style.flex = '1 1 45%';
+    b.addEventListener('click', ()=>loadDatasetById(ds.id));
+    row.appendChild(b);
+  });
+  if(row.children.length===0){
+    const p = document.createElement('div'); p.className='hint';
+    p.textContent = CATALOG.datasets.length ? 'המורה לא הפעיל/ה סטי נתונים מהמאגר.' : 'המאגר ריק או שלא נטען.';
+    row.appendChild(p);
+  }
+}
+
+function applyTeacherConfig(){
+  Object.keys(VIS_TARGETS).forEach(k=>{
+    const el = $(VIS_TARGETS[k]);
+    if(el) el.style.display = teacherConfig.visible[k] ? '' : 'none';
+  });
+  if(state.rows && state.rows.length) populateColumnUI();
+  else $('colSelectors').style.display = 'none';
+  renderDatasetButtons();
+}
+
+function populateTeacherModalInputs(){
+  document.querySelectorAll('#teacherModal [data-vis]').forEach(cb=>{ cb.checked = !!teacherConfig.visible[cb.dataset.vis]; });
+  const libList = $('tmLibraryList'); libList.innerHTML='';
+  CATALOG.datasets.forEach(ds=>{
+    const lbl = document.createElement('label'); lbl.className='tm-check';
+    lbl.innerHTML = `<input type="checkbox" data-lib="${ds.id}" ${teacherConfig.library[ds.id]?'checked':''}><span>${ds.name}<br><span class="hint">${ds.desc}</span></span>`;
+    libList.appendChild(lbl);
+  });
+}
+
+function openTeacherModal(){
+  catalogReady.then(()=>{ populateTeacherModalInputs(); $('teacherModal').style.display='flex'; });
+}
+function closeTeacherModal(){ $('teacherModal').style.display='none'; }
+
+$('teacherModal').addEventListener('change', e=>{
+  if(e.target.dataset && e.target.dataset.vis){
+    teacherConfig.visible[e.target.dataset.vis] = e.target.checked;
+    applyTeacherConfig();
+  }
+  if(e.target.dataset && e.target.dataset.lib){
+    teacherConfig.library[e.target.dataset.lib] = e.target.checked;
+    renderDatasetButtons();
+  }
+});
+$('btnCloseTeacher').addEventListener('click', closeTeacherModal);
+$('btnTeacherFallback').addEventListener('click', openTeacherModal);
+$('btnTeacherApply').addEventListener('click', ()=>{ applyTeacherConfig(); closeTeacherModal(); });
+$('btnTeacherReset').addEventListener('click', ()=>{
+  Object.keys(teacherConfig.visible).forEach(k=>teacherConfig.visible[k]=true);
+  teacherConfig.visible.columnSelectors = true;
+  Object.keys(teacherConfig.library).forEach(k=>teacherConfig.library[k]=true);
+  applyTeacherConfig(); populateTeacherModalInputs();
+});
+$('btnTeacherExport').addEventListener('click', ()=>{
+  const blob = new Blob([JSON.stringify(teacherConfig, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='kmenas_config.json';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+$('teacherImportInput').addEventListener('change', e=>{
+  const f = e.target.files[0]; if(!f) return;
+  const reader = new FileReader();
+  reader.onload = ev=>{
+    try{
+      const cfg = JSON.parse(ev.target.result);
+      if(cfg.visible) Object.assign(teacherConfig.visible, cfg.visible);
+      if(cfg.library) Object.assign(teacherConfig.library, cfg.library);
+      applyTeacherConfig(); populateTeacherModalInputs();
+      setStatus('קונפיגורציה נטענה בהצלחה.');
+    }catch(err){ setStatus('שגיאה בקריאת קובץ הקונפיגורציה.'); }
+  };
+  reader.readAsText(f, 'UTF-8');
+  e.target.value = '';
+});
+
+// Ctrl+C+M opens the teacher panel. Implemented as a short sequence (Ctrl+C then
+// Ctrl+M within ~1.2s) rather than requiring all keys held at once — holding three
+// keys together is unreliable across browsers/OSes, and Ctrl+C is a reserved
+// "copy" shortcut that some browsers intercept before a simultaneous-hold check
+// can see it.
+let lastCtrlCTime = 0;
+window.addEventListener('keydown', e=>{
+  const k = e.key.toLowerCase();
+  if(e.ctrlKey && k==='c'){
+    lastCtrlCTime = Date.now();
+  } else if(e.ctrlKey && k==='m'){
+    if(Date.now() - lastCtrlCTime < 1200){
+      e.preventDefault();
+      openTeacherModal();
+      lastCtrlCTime = 0;
+    }
+  }
+  if(k==='escape' && $('teacherModal').style.display!=='none'){ closeTeacherModal(); }
+});
+
+// ---------------- Wiring ----------------
+$('fileInput').addEventListener('change', e=>{
+  const f = e.target.files[0]; if(!f) return;
+  const reader = new FileReader();
+  reader.onload = ev=>{ const {headers, rows} = parseCSV(ev.target.result); loadDataset(headers, rows); };
+  reader.readAsText(f, 'UTF-8');
+});
+
+$('scenarioSelect').addEventListener('change', e=>applyScenario(e.target.value));
+$('btnScenarioRandom').addEventListener('click', ()=>{ resetModel(true); setStatus('אותחל מיקום אקראי חדש לצנטרואידים.'); });
+
+$('vizModeSelect').addEventListener('change', e=>{ state.vizMode = e.target.value; populateColumnUI(); rebuildPoints(); resetModel(true); });
+$('xColSelect').addEventListener('change', e=>{ state.xCol = e.target.value; rebuildPoints(); resetModel(true); });
+$('yColSelect').addEventListener('change', e=>{ state.yCol = e.target.value; rebuildPoints(); resetModel(true); });
+
+$('kMinus').addEventListener('click', ()=>{ state.k = Math.max(1, state.k-1); $('kValue').textContent = state.k; resetModel(true); });
+$('kPlus').addEventListener('click', ()=>{ state.k = Math.min(10, state.k+1); $('kValue').textContent = state.k; resetModel(true); });
+$('btnReinit').addEventListener('click', ()=>{ resetModel(true); setStatus('צנטרואידים אותחלו מחדש.'); });
+
+$('btnPlay').addEventListener('click', ()=>toggleRun());
+$('btnStep').addEventListener('click', ()=>{ toggleRun(false); stepOnce(); });
+$('speedRange').addEventListener('input', e=>{ state.speed = +e.target.value; $('speedLabel').textContent = state.speed+'ms'; if(state.running) toggleRun(true); });
+
+function setShowLines(on){
+  state.showLines = on;
+  $('btnLines').classList.toggle('on', on);
+  render();
+}
+function setMinMax(on){
+  if($('btnMinMax').disabled) return;
+  if(state.minmax === on) return;
+  state.minmax = on;
+  $('btnMinMax').classList.toggle('on', on);
+  applyMinMaxTransform(on);
+  assign(); render();
+  setStatus(on ? 'הופעל נרמול Min-Max (0–1) על שני המאפיינים.' : 'נרמול Min-Max בוטל — חזרה לערכים המקוריים.');
+}
+
+$('btnLines').addEventListener('click', ()=>setShowLines(!state.showLines));
+$('btnMinMax').addEventListener('click', ()=>setMinMax(!state.minmax));
+$('btnSilhouette').addEventListener('click', ()=>{
+  if(state.points.length===0 || state.k<2){
+    setStatus('טענו נתונים (ו-K של 2 ומעלה) לפני הצגת ניתוח סילואט.');
+    return;
+  }
+  state.showSilhouette = !state.showSilhouette;
+  $('btnSilhouette').classList.toggle('on', state.showSilhouette);
+  const row = $('silhouetteRow');
+  row.style.display = state.showSilhouette ? 'grid' : 'none';
+  if(state.showSilhouette){
+    renderSilhouette();
+    row.classList.remove('panel-pulse'); void row.offsetWidth; row.classList.add('panel-pulse');
+    row.scrollIntoView({behavior:'smooth', block:'start'});
+  }
+});
+
+function resetAll(){
+  toggleRun(false);
+  if(state.map){ state.map.remove(); state.map = null; }
+  state.headers=[]; state.rows=[]; state.numericCols=[]; state.latCol=null; state.lonCol=null;
+  state.xCol=null; state.yCol=null; state.vizMode='scatter'; state.geoAvailable=false;
+  state.points=[]; state.k=3; state.centroids=[]; state.speed=600;
+  state.showLines=false; state.showSilhouette=false; state.minmax=false;
+  state.iteration=0; state.wcssHistory=[]; state.converged=false; state.dragging=null;
+  state.mapMarkers=[]; state.mapCentroidMarkers=[]; state.mapLines=[]; state._mapFitted=false;
+
+  $('fileInput').value = '';
+  $('scenarioSelect').value = 'free';
+  $('scenarioDesc').style.display = 'none';
+  $('btnScenarioRandom').style.display = 'none';
+  $('colSelectors').style.display = 'none';
+  $('kValue').textContent = state.k;
+  $('speedRange').value = state.speed; $('speedLabel').textContent = state.speed+'ms';
+  $('btnLines').classList.remove('on');
+  $('btnMinMax').classList.remove('on'); $('btnMinMax').disabled = false;
+  $('btnSilhouette').classList.remove('on');
+  $('silhouetteRow').style.display = 'none';
+  $('btnPlay').textContent = '▶ הפעל'; $('btnPlay').classList.add('primary');
+  $('svgStage').innerHTML=''; $('svgStage').style.display='block'; $('mapStage').style.display='none';
+  $('statsBody').innerHTML=''; $('totalSum').textContent='–';
+  $('wcssReadout').textContent='–'; $('iterReadout').textContent='0';
+  $('legendBox').innerHTML=''; $('modeHint').textContent='';
+  $('dataHint').textContent = 'טרם נטענו נתונים. ניתן לטעון קובץ CSV עם עמודות מספריות, או להשתמש בנתוני דוגמה.';
+  setStatus('הסימולטור אופס.');
+  render();
+}
+$('btnReset').addEventListener('click', resetAll);
+
+// init
+$('kValue').textContent = state.k;
+render();
+const catalogReady = loadCatalog().then(()=>{ renderDatasetButtons(); });
+})();
+</script>
+</body>
+</html>

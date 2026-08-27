@@ -394,8 +394,12 @@
         </label>
         <label class="field">
           <span class="lbl">קובץ מתיקיית data/</span>
-          <select id="newScenarioFile"><option value="">— בחרו קובץ —</option></select>
+          <div class="row">
+            <select id="newScenarioFile" style="flex:1;"><option value="">— בחרו קובץ —</option></select>
+            <button type="button" class="small" id="btnRefreshDataFiles" title="רענון רשימת הקבצים ישירות מתיקיית data/ בריפו ב-GitHub" style="flex:0 0 auto;">🔄</button>
+          </div>
         </label>
+        <div class="hint" id="dataFilesStatus" style="margin-top:-6px; margin-bottom:11px;"></div>
         <label class="field">
           <span class="lbl">תיאור לתלמיד (רשות)</span>
           <input type="text" id="newScenarioDesc" placeholder="מה המטרה של התרחיש?">
@@ -958,8 +962,63 @@ async function loadCatalog(){
   rebuildScenarioOptions();
 }
 
-function findDataset(id){ return CATALOG.datasets.find(d=>d.id===id); }
+function findDataset(id){ return mergedDatasets().find(d=>d.id===id); }
 function findScenario(id){ return CATALOG.scenarios.find(s=>s.id===id) || teacherConfig.customScenarios.find(s=>s.id===id); }
+
+// ---------------- Live data/ folder listing (GitHub API) ----------------
+// catalog.json is a manually-maintained manifest, which means a CSV pushed to
+// /data isn't actually reachable from the teacher panel until someone hand-
+// edits that JSON. Since this app is meant to run on GitHub Pages, we can do
+// better: read the real directory listing straight from the GitHub API, so
+// any file that's physically in /data shows up immediately, registered or not.
+let liveDataFiles = null; // null = not fetched / unavailable; [] = fetched, empty; [...] = files found
+
+function detectGitHubRepo(){
+  const host = window.location.hostname;
+  const m = host.match(/^([a-z0-9-]+)\.github\.io$/i);
+  if(!m) return null;
+  const owner = m[1];
+  const repo = window.location.pathname.split('/').filter(Boolean)[0];
+  return repo ? { owner, repo } : null; // no repo segment => user/org root site, can't infer a repo name
+}
+
+async function fetchLiveDataFiles(){
+  const repoInfo = detectGitHubRepo();
+  if(!repoInfo){
+    liveDataFiles = null;
+    $('dataFilesStatus').textContent = 'לא זוהה ריפו GitHub Pages (למשל בבדיקה מקומית) — מוצגים רק קבצים הרשומים ב-catalog.json.';
+    return;
+  }
+  $('dataFilesStatus').textContent = `בודק את תיקיית data/ ב-${repoInfo.owner}/${repoInfo.repo}…`;
+  try{
+    const res = await fetch(`https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}/contents/data`);
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const items = await res.json();
+    liveDataFiles = items
+      .filter(it=>it.type==='file' && /\.csv$/i.test(it.name))
+      .map(it=>({ name: it.name, path: 'data/'+it.name }));
+    $('dataFilesStatus').textContent = `נמצאו ${liveDataFiles.length} קבצי CSV בתיקיית data/ בריפו.`;
+  }catch(err){
+    liveDataFiles = null;
+    $('dataFilesStatus').textContent = 'לא ניתן היה לגשת ל-GitHub API כרגע (ייתכן מגבלת קצב או בעיית רשת) — מוצגים רק קבצים הרשומים ב-catalog.json.';
+  }
+}
+
+// Combines catalog.json's registered datasets (which carry a nice name/desc)
+// with anything discovered live in /data but not yet registered — those get a
+// generated entry so they're still selectable when building a scenario.
+function mergedDatasets(){
+  const known = new Set(CATALOG.datasets.map(ds=>ds.file));
+  const merged = [...CATALOG.datasets];
+  if(liveDataFiles){
+    liveDataFiles.forEach(f=>{
+      if(!known.has(f.path)){
+        merged.push({ id:'auto_'+f.name.replace(/\.csv$/i,''), name:f.name, desc:'זוהה אוטומטית מתיקיית data/ — לא רשום עדיין ב-catalog.json', file:f.path, auto:true });
+      }
+    });
+  }
+  return merged;
+}
 
 // Builds the main dropdown from *authored scenarios only* — scenarios pre-defined
 // in catalog.json, plus any the teacher created live in the config panel. Raw
@@ -1064,14 +1123,18 @@ function applyTeacherConfig(){
 function populateTeacherModalInputs(){
   document.querySelectorAll('#teacherModal [data-vis]').forEach(cb=>{ cb.checked = !!teacherConfig.visible[cb.dataset.vis]; });
 
-  // file picker for the "create new scenario" form — every file registered in
-  // catalog.json (i.e. every CSV present in /data)
+  // file picker for the "create new scenario" form — catalog.json entries plus
+  // anything discovered live in /data (see fetchLiveDataFiles / mergedDatasets)
   const fileSel = $('newScenarioFile');
+  const prevFileVal = fileSel.value;
   fileSel.innerHTML = '<option value="">— בחרו קובץ —</option>';
-  CATALOG.datasets.forEach(ds=>{
-    const o = document.createElement('option'); o.value = ds.id; o.textContent = `${ds.name}  (${ds.file})`; o.title = ds.desc;
+  mergedDatasets().forEach(ds=>{
+    const o = document.createElement('option'); o.value = ds.id;
+    o.textContent = (ds.auto ? '🆕 ' : '') + `${ds.name}  (${ds.file})`;
+    o.title = ds.desc;
     fileSel.appendChild(o);
   });
+  fileSel.value = [...fileSel.options].some(o=>o.value===prevFileVal) ? prevFileVal : '';
 
   // scenario management list: catalog-authored (visibility toggle only) + custom (toggle + delete)
   const list = $('tmScenarioList'); list.innerHTML = '';
@@ -1099,9 +1162,19 @@ function populateTeacherModalInputs(){
 }
 
 function openTeacherModal(){
-  catalogReady.then(()=>{ populateTeacherModalInputs(); $('teacherModal').style.display='flex'; });
+  catalogReady.then(async ()=>{
+    populateTeacherModalInputs();
+    $('teacherModal').style.display='flex';
+    if(liveDataFiles===null){ await fetchLiveDataFiles(); populateTeacherModalInputs(); }
+  });
 }
 function closeTeacherModal(){ $('teacherModal').style.display='none'; }
+
+$('btnRefreshDataFiles').addEventListener('click', async ()=>{
+  $('dataFilesStatus').textContent = 'מרענן…';
+  await fetchLiveDataFiles();
+  populateTeacherModalInputs();
+});
 
 $('teacherModal').addEventListener('change', e=>{
   if(e.target.dataset && e.target.dataset.vis){
@@ -1289,6 +1362,7 @@ $('btnReset').addEventListener('click', resetAll);
 $('kValue').textContent = state.k;
 render();
 const catalogReady = loadCatalog();
+catalogReady.then(()=>{ fetchLiveDataFiles(); }); // warm the live /data listing early, not just on teacher-panel open
 })();
 </script>
 </body>

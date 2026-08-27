@@ -1,0 +1,45 @@
+{
+  "datasets": [
+    {
+      "id": "geoCities",
+      "name": "ערים בישראל",
+      "desc": "מיקומים גיאוגרפיים סביב 4 ערים",
+      "file": "data/geo_cities.csv"
+    },
+    {
+      "id": "hospitalVillages",
+      "name": "יישובים — בית חולים שדה",
+      "desc": "סט הנתונים של תרחיש 1",
+      "file": "data/hospital_villages.csv"
+    },
+    {
+      "id": "plainBlobs",
+      "name": "אשכולות מספריים כלליים",
+      "desc": "ארבעה אשכולות דו-ממדיים + שני חריגים",
+      "file": "data/plain_blobs.csv"
+    },
+    {
+      "id": "salesDemo",
+      "name": "מכירות לפי סניף",
+      "desc": "מבקרים מול הכנסה בשלושה אזורי מכירה",
+      "file": "data/sales_demo.csv"
+    },
+    {
+      "id": "tempSensors",
+      "name": "חיישני טמפרטורה ולחות",
+      "desc": "קריאות חיישנים משלושה אזורים באולם",
+      "file": "data/temp_sensors.csv"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "q1",
+      "title": "שאלה 1 · מיקום בית חולים שדה",
+      "description": "כל נקודה מייצגת יישוב באזור. המטרה: מקמו בית חולים שדה (צנטרואיד יחיד, או מספר מתקנים אם תעלו את K) כך שסכום המרחקים מהיישובים למתקן המשויך יהיה מינימלי. עקבו אחר \"סה״כ סכום מרחקים\" בפאנל הסטטיסטיקה, גררו את הצנטרואיד ידנית או הריצו את האלגוריתם, ונסו כמה אתחולים אקראיים כדי לראות אם מתקבלת אותה תוצאה.",
+      "dataset": "hospitalVillages",
+      "defaultK": 1,
+      "defaultMinMax": false,
+      "defaultShowLines": true
+    }
+  ]
+}

@@ -2,6 +2,22 @@
 
 אתר סטטי בקובץ אחד (`index.html`) + מאגר קבצים (`data/`, `catalog.json`) — מוכן לפרסום ב-GitHub Pages ללא build, שרת, או תלות בשרת חיצוני.
 
+## חיבור הריפו המקומי ל-GitHub
+
+הפרויקט הזה כבר מאותחל כריפו Git מקומי (ענף `main`, עם היסטוריית קומיטים מסודרת). כדי לחבר אותו לחשבון GitHub שלכם:
+
+1. צרו ריפו **ריק** חדש ב-GitHub בשם `KMENAS` (בלי README/gitignore/license — כדי לא להתנגש עם מה שכבר יש).
+2. בטרמינל, בתוך תיקיית הפרויקט:
+
+```bash
+git remote add origin https://github.com/<username>/KMENAS.git
+git push -u origin main
+```
+
+(אם אתם מעדיפים SSH: `git remote add origin git@github.com:<username>/KMENAS.git`)
+
+3. לאחר הפוש, המשיכו לשלב "פרסום ב-GitHub Pages" למטה.
+
 ## פרסום ב-GitHub Pages
 
 1. צרו ריפו חדש ב-GitHub והעלו את כל התוכן של התיקייה הזו (`index.html`, `catalog.json`, `data/`, `README.md`) לענף הראשי.

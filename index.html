@@ -411,7 +411,7 @@
         <label class="tm-check"><input type="checkbox" id="newScenarioMinMax"> Min-Max כברירת מחדל</label>
         <label class="tm-check"><input type="checkbox" id="newScenarioLines" checked> הצג קווי מרחק כברירת מחדל</label>
         <button class="btn-full primary" id="btnAddScenario" style="margin-top:6px;">➕ הוסף תרחיש לתפריט</button>
-        <div class="hint" style="margin-top:10px;">התרחיש נשמר לסשן הנוכחי בדפדפן. כדי לשמור אותו לצמיתות, ייצאו קונפיגורציה (למטה) ושמרו את הקובץ, או העתיקו את הגדרתו ידנית ל-<code>catalog.json</code>.</div>
+        <div class="hint" style="margin-top:10px;">התרחיש נשמר אוטומטית בדפדפן הזה ויישאר גם אחרי רענון או סגירה. שימו לב: השמירה מקומית למחשב/דפדפן הזה בלבד — כדי שהתלמידים יראו את התרחיש (בפתיחה מ-GitHub Pages), ייצאו קונפיגורציה (למטה) ושמרו את הקובץ, או העתיקו את הגדרתו ידנית ל-<code>catalog.json</code>.</div>
       </div>
     </div>
     <div class="teacher-modal-actions">
@@ -1112,6 +1112,32 @@ const teacherConfig = {
   customScenarios: []       // scenarios created live: {id, title, description, dataset, defaultK, defaultMinMax, defaultShowLines}
 };
 
+// Custom scenarios only exist in memory otherwise, so a page refresh would
+// silently wipe out anything a teacher just built. Auto-save/restore via
+// localStorage keeps them across sessions on this browser/device -- it does
+// NOT publish them to students, who load catalog.json fresh from the server.
+const TEACHER_STORAGE_KEY = 'kmenas_teacher_config';
+function saveTeacherConfigToStorage(){
+  try{
+    localStorage.setItem(TEACHER_STORAGE_KEY, JSON.stringify({
+      visible: teacherConfig.visible,
+      scenarioVisibility: teacherConfig.scenarioVisibility,
+      customScenarios: teacherConfig.customScenarios
+    }));
+  }catch(e){ /* private browsing / storage disabled -- fall back to in-memory only */ }
+}
+function loadTeacherConfigFromStorage(){
+  try{
+    const raw = localStorage.getItem(TEACHER_STORAGE_KEY);
+    if(!raw) return;
+    const cfg = JSON.parse(raw);
+    if(cfg.visible) Object.assign(teacherConfig.visible, cfg.visible);
+    if(cfg.scenarioVisibility) Object.assign(teacherConfig.scenarioVisibility, cfg.scenarioVisibility);
+    if(Array.isArray(cfg.customScenarios)) teacherConfig.customScenarios = cfg.customScenarios;
+  }catch(e){ /* corrupt/unavailable storage -- start from defaults */ }
+}
+loadTeacherConfigFromStorage();
+
 const VIS_TARGETS = {
   scenarioPanel:'panelScenario', fileUpload:'ctrlFileUpload',
   kControl:'ctrlKControl', reinitButton:'btnReinit', runButtons:'ctrlRunButtons',
@@ -1189,10 +1215,12 @@ $('teacherModal').addEventListener('change', e=>{
   if(e.target.dataset && e.target.dataset.vis){
     teacherConfig.visible[e.target.dataset.vis] = e.target.checked;
     applyTeacherConfig();
+    saveTeacherConfigToStorage();
   }
   if(e.target.dataset && e.target.dataset.scenariovis){
     teacherConfig.scenarioVisibility[e.target.dataset.scenariovis] = e.target.checked;
     rebuildScenarioOptions();
+    saveTeacherConfigToStorage();
   }
 });
 $('teacherModal').addEventListener('click', e=>{
@@ -1202,6 +1230,7 @@ $('teacherModal').addEventListener('click', e=>{
     delete teacherConfig.scenarioVisibility[id];
     populateTeacherModalInputs();
     rebuildScenarioOptions();
+    saveTeacherConfigToStorage();
   }
 });
 $('btnAddScenario').addEventListener('click', ()=>{
@@ -1224,7 +1253,8 @@ $('btnAddScenario').addEventListener('click', ()=>{
   $('newScenarioK').value='3'; $('newScenarioMinMax').checked=false; $('newScenarioLines').checked=true;
   populateTeacherModalInputs();
   rebuildScenarioOptions();
-  setStatus(`התרחיש "${name}" נוצר ומופיע כעת בתפריט הראשי.`);
+  saveTeacherConfigToStorage();
+  setStatus(`התרחיש "${name}" נוצר ומופיע כעת בתפריט הראשי, ונשמר אוטומטית בדפדפן הזה.`);
 });
 $('btnCloseTeacher').addEventListener('click', closeTeacherModal);
 $('btnTeacherFallback').addEventListener('click', openTeacherModal);
@@ -1233,6 +1263,7 @@ $('btnTeacherReset').addEventListener('click', ()=>{
   Object.keys(teacherConfig.visible).forEach(k=>teacherConfig.visible[k]=true);
   teacherConfig.scenarioVisibility = {};
   applyTeacherConfig(); populateTeacherModalInputs();
+  saveTeacherConfigToStorage();
 });
 $('btnTeacherExport').addEventListener('click', ()=>{
   const cfg = { visible: teacherConfig.visible, scenarioVisibility: teacherConfig.scenarioVisibility, customScenarios: teacherConfig.customScenarios };
@@ -1252,6 +1283,7 @@ $('teacherImportInput').addEventListener('change', e=>{
       if(cfg.scenarioVisibility) Object.assign(teacherConfig.scenarioVisibility, cfg.scenarioVisibility);
       if(Array.isArray(cfg.customScenarios)) teacherConfig.customScenarios = cfg.customScenarios;
       applyTeacherConfig(); populateTeacherModalInputs();
+      saveTeacherConfigToStorage();
       setStatus('קונפיגורציה נטענה בהצלחה.');
     }catch(err){ setStatus('שגיאה בקריאת קובץ הקונפיגורציה.'); }
   };

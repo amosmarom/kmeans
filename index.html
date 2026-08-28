@@ -387,7 +387,19 @@
         <div id="tmScenarioList"></div>
       </div>
       <div class="tm-col">
-        <h3>יצירת תרחיש חדש</h3>
+        <h3>סנכרון אוטומטי ל-GitHub</h3>
+        <div class="hint" style="margin-top:-4px;">תרחישים חדשים תמיד נשמרים בדפדפן הזה. אם תגדירו כאן טוקן GitHub עם הרשאת כתיבה לריפו, כל תרחיש חדש גם ייכתב אוטומטית ל-<code>catalog.json</code> בענף main — ויופיע לתלמידים תוך כדקה, בלי שום פעולה ידנית נוספת.</div>
+        <label class="field">
+          <span class="lbl">GitHub Personal Access Token (הרשאת repo)</span>
+          <input type="password" id="ghTokenInput" placeholder="ghp_...">
+        </label>
+        <div class="row" style="gap:8px;">
+          <button type="button" class="small" id="btnSaveGhToken">💾 שמירת טוקן</button>
+          <button type="button" class="small" id="btnClearGhToken">🗑 מחיקת טוקן</button>
+        </div>
+        <div class="hint" id="ghTokenStatus" style="margin-top:6px;"></div>
+
+        <h3 style="margin-top:22px;">יצירת תרחיש חדש</h3>
         <label class="field">
           <span class="lbl">שם התרחיש (יופיע בתפריט הראשי)</span>
           <input type="text" id="newScenarioName" placeholder="לדוגמה: שאלה 2 · אשכולות לקוחות">
@@ -411,7 +423,7 @@
         <label class="tm-check"><input type="checkbox" id="newScenarioMinMax"> Min-Max כברירת מחדל</label>
         <label class="tm-check"><input type="checkbox" id="newScenarioLines" checked> הצג קווי מרחק כברירת מחדל</label>
         <button class="btn-full primary" id="btnAddScenario" style="margin-top:6px;">➕ הוסף תרחיש לתפריט</button>
-        <div class="hint" style="margin-top:10px;">התרחיש נשמר אוטומטית בדפדפן הזה ויישאר גם אחרי רענון או סגירה. שימו לב: השמירה מקומית למחשב/דפדפן הזה בלבד — כדי שהתלמידים יראו את התרחיש (בפתיחה מ-GitHub Pages), ייצאו קונפיגורציה (למטה) ושמרו את הקובץ, או העתיקו את הגדרתו ידנית ל-<code>catalog.json</code>.</div>
+        <div class="hint" style="margin-top:10px;">התרחיש נשמר אוטומטית בדפדפן הזה ויישאר גם אחרי רענון או סגירה. אם הגדרתם טוקן GitHub למעלה, הוא גם יסונכרן אוטומטית ל-<code>catalog.json</code> ויופיע לתלמידים. בלי טוקן, השמירה מקומית בלבד — ייצאו קונפיגורציה (למטה) או העתיקו ידנית ל-<code>catalog.json</code> כדי לפרסם.</div>
       </div>
     </div>
     <div class="teacher-modal-actions">
@@ -1138,6 +1150,83 @@ function loadTeacherConfigFromStorage(){
 }
 loadTeacherConfigFromStorage();
 
+// ---------------- GitHub auto-sync for new scenarios ----------------
+// A teacher can optionally save a GitHub personal access token (repo write
+// scope) here so that every scenario created in the panel is committed
+// straight into catalog.json on GitHub, not just saved to this browser --
+// that's the only way it reaches students loading the real GitHub Pages site.
+// Kept in its own localStorage key, deliberately separate from
+// TEACHER_STORAGE_KEY, so it never rides along in an exported/imported config.
+const GH_TOKEN_KEY = 'kmenas_gh_token';
+function getGitHubToken(){ try{ return localStorage.getItem(GH_TOKEN_KEY) || ''; }catch(e){ return ''; } }
+function setGitHubToken(token){
+  try{
+    if(token) localStorage.setItem(GH_TOKEN_KEY, token);
+    else localStorage.removeItem(GH_TOKEN_KEY);
+  }catch(e){ /* private browsing / storage disabled */ }
+}
+
+function utf8ToBase64(str){
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  bytes.forEach(b=>{ binary += String.fromCharCode(b); });
+  return btoa(binary);
+}
+function base64ToUtf8(b64){
+  const binary = atob(b64.replace(/\n/g,''));
+  const bytes = new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+// Commits `scenario` into catalog.json's scenarios array on the main branch
+// via the GitHub Contents API. Returns {ok:true} or {ok:false, message}.
+async function pushScenarioToGitHub(scenario){
+  const repoInfo = detectGitHubRepo();
+  if(!repoInfo) return {ok:false, message:'לא ניתן לזהות את הריפו (הוסיפו "githubRepo" ל-catalog.json).'};
+  const token = getGitHubToken();
+  if(!token) return {ok:false, message:'לא הוגדר טוקן GitHub.'};
+  const apiUrl = `https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}/contents/catalog.json`;
+  try{
+    const getRes = await fetch(apiUrl, { headers:{ Authorization:`token ${token}`, Accept:'application/vnd.github+json' } });
+    if(!getRes.ok){
+      if(getRes.status===401) return {ok:false, message:'הטוקן לא תקף או שפג תוקפו.'};
+      if(getRes.status===404) return {ok:false, message:'לא נמצא catalog.json בריפו.'};
+      return {ok:false, message:`שגיאה בקריאת catalog.json (HTTP ${getRes.status}).`};
+    }
+    const getData = await getRes.json();
+    const current = JSON.parse(base64ToUtf8(getData.content));
+    if(!Array.isArray(current.scenarios)) current.scenarios = [];
+    current.scenarios.push(scenario);
+    const putRes = await fetch(apiUrl, {
+      method:'PUT',
+      headers:{ Authorization:`token ${token}`, Accept:'application/vnd.github+json', 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        message: `Add scenario: ${scenario.title}`,
+        content: utf8ToBase64(JSON.stringify(current, null, 2) + '\n'),
+        sha: getData.sha,
+        branch: 'main'
+      })
+    });
+    if(!putRes.ok){
+      const errBody = await putRes.json().catch(()=>({}));
+      if(putRes.status===403) return {ok:false, message:'לטוקן אין הרשאת כתיבה לריפו הזה.'};
+      if(putRes.status===409) return {ok:false, message:'התנגשות עם שינוי מקביל ב-catalog.json — נסו לסנכרן שוב.'};
+      return {ok:false, message: errBody.message || `שגיאה בכתיבה ל-GitHub (HTTP ${putRes.status}).`};
+    }
+    return {ok:true};
+  }catch(err){
+    return {ok:false, message:'שגיאת רשת בעת הגישה ל-GitHub API.'};
+  }
+}
+
+function updateGhTokenStatus(){
+  const has = !!getGitHubToken();
+  $('ghTokenStatus').textContent = has
+    ? '✓ טוקן שמור בדפדפן זה — תרחישים חדשים יסונכרנו אוטומטית ל-GitHub.'
+    : 'לא הוגדר טוקן — תרחישים חדשים יישמרו בדפדפן זה בלבד.';
+}
+
 const VIS_TARGETS = {
   scenarioPanel:'panelScenario', fileUpload:'ctrlFileUpload',
   kControl:'ctrlKControl', reinitButton:'btnReinit', runButtons:'ctrlRunButtons',
@@ -1157,6 +1246,7 @@ function applyTeacherConfig(){
 
 function populateTeacherModalInputs(){
   document.querySelectorAll('#teacherModal [data-vis]').forEach(cb=>{ cb.checked = !!teacherConfig.visible[cb.dataset.vis]; });
+  updateGhTokenStatus();
 
   // file picker for the "create new scenario" form — catalog.json entries plus
   // anything discovered live in /data (see fetchLiveDataFiles / mergedDatasets)
@@ -1188,8 +1278,9 @@ function populateTeacherModalInputs(){
     row.innerHTML = `
       <label class="tm-check">
         <input type="checkbox" data-scenariovis="${sc.id}" ${visible?'checked':''}>
-        <span>${sc.title}<br><span class="hint">${sc.origin==='catalog' ? 'מוגדר מראש (catalog.json)' : 'נוצר על ידך'} · קובץ: ${sc.dataset}</span></span>
+        <span>${sc.title}<br><span class="hint">${sc.origin==='catalog' ? 'מוגדר מראש (catalog.json)' : 'נוצר על ידך · לא סונכרן ל-GitHub'} · קובץ: ${sc.dataset}</span></span>
       </label>
+      ${sc.origin==='custom' ? `<button class="small" data-sync-scenario="${sc.id}" title="סנכרון ל-GitHub (catalog.json)">🔄</button>` : ''}
       ${sc.origin==='custom' ? `<button class="small" data-del-scenario="${sc.id}" title="מחק תרחיש">✕</button>` : ''}
     `;
     list.appendChild(row);
@@ -1223,6 +1314,27 @@ $('teacherModal').addEventListener('change', e=>{
     saveTeacherConfigToStorage();
   }
 });
+// Attempts to publish a locally-created scenario to GitHub. On success it's
+// moved out of customScenarios into CATALOG.scenarios (it's now genuinely
+// catalog-authored, just written by the app instead of by hand). On failure
+// it stays in customScenarios so the teacher can retry via the 🔄 button.
+async function trySyncCustomScenario(sc, {silent}={}){
+  if(!silent) setStatus(`מסנכרן את "${sc.title}" ל-GitHub…`);
+  const result = await pushScenarioToGitHub(sc);
+  if(result.ok){
+    teacherConfig.customScenarios = teacherConfig.customScenarios.filter(s=>s.id!==sc.id);
+    if(!CATALOG.scenarios.some(s=>s.id===sc.id)) CATALOG.scenarios.push(sc);
+    populateTeacherModalInputs();
+    rebuildScenarioOptions();
+    saveTeacherConfigToStorage();
+    setStatus(`התרחיש "${sc.title}" סונכרן ל-GitHub ויופיע לתלמידים תוך כדקה (אחרי עדכון GitHub Pages).`);
+  }else{
+    populateTeacherModalInputs();
+    setStatus(`התרחיש "${sc.title}" נשמר מקומית בלבד — הסנכרון ל-GitHub נכשל: ${result.message}`);
+  }
+  return result;
+}
+
 $('teacherModal').addEventListener('click', e=>{
   if(e.target.dataset && e.target.dataset.delScenario){
     const id = e.target.dataset.delScenario;
@@ -1232,29 +1344,58 @@ $('teacherModal').addEventListener('click', e=>{
     rebuildScenarioOptions();
     saveTeacherConfigToStorage();
   }
+  if(e.target.dataset && e.target.dataset.syncScenario){
+    const id = e.target.dataset.syncScenario;
+    const sc = teacherConfig.customScenarios.find(s=>s.id===id);
+    if(!sc) return;
+    if(!getGitHubToken()){ setStatus('הגדירו טוקן GitHub למעלה לפני סנכרון.'); return; }
+    trySyncCustomScenario(sc);
+  }
 });
-$('btnAddScenario').addEventListener('click', ()=>{
+$('btnSaveGhToken').addEventListener('click', ()=>{
+  const token = $('ghTokenInput').value.trim();
+  if(!token){ setStatus('הזינו טוקן לפני שמירה.'); return; }
+  setGitHubToken(token);
+  $('ghTokenInput').value = '';
+  updateGhTokenStatus();
+  setStatus('טוקן GitHub נשמר בדפדפן זה.');
+});
+$('btnClearGhToken').addEventListener('click', ()=>{
+  setGitHubToken('');
+  $('ghTokenInput').value = '';
+  updateGhTokenStatus();
+  setStatus('טוקן GitHub נמחק.');
+});
+$('btnAddScenario').addEventListener('click', async ()=>{
   const name = $('newScenarioName').value.trim();
   const fileId = $('newScenarioFile').value;
   if(!name){ setStatus('יש להזין שם לתרחיש.'); return; }
   if(!fileId){ setStatus('יש לבחור קובץ מתיקיית data.'); return; }
   const id = 'custom_' + Date.now();
   const kVal = Math.max(1, Math.min(10, parseInt($('newScenarioK').value, 10) || 3));
-  teacherConfig.customScenarios.push({
+  const scenario = {
     id, title: name,
     description: $('newScenarioDesc').value.trim(),
     dataset: fileId,
     defaultK: kVal,
     defaultMinMax: $('newScenarioMinMax').checked,
     defaultShowLines: $('newScenarioLines').checked
-  });
+  };
+  teacherConfig.customScenarios.push(scenario);
   teacherConfig.scenarioVisibility[id] = true;
   $('newScenarioName').value=''; $('newScenarioDesc').value=''; $('newScenarioFile').value='';
   $('newScenarioK').value='3'; $('newScenarioMinMax').checked=false; $('newScenarioLines').checked=true;
   populateTeacherModalInputs();
   rebuildScenarioOptions();
   saveTeacherConfigToStorage();
-  setStatus(`התרחיש "${name}" נוצר ומופיע כעת בתפריט הראשי, ונשמר אוטומטית בדפדפן הזה.`);
+
+  if(getGitHubToken()){
+    $('btnAddScenario').disabled = true;
+    await trySyncCustomScenario(scenario, {silent:true});
+    $('btnAddScenario').disabled = false;
+  }else{
+    setStatus(`התרחיש "${name}" נוצר ומופיע כעת בתפריט הראשי, ונשמר אוטומטית בדפדפן הזה. הגדירו טוקן GitHub למעלה כדי לסנכרן אוטומטית גם לתלמידים.`);
+  }
 });
 $('btnCloseTeacher').addEventListener('click', closeTeacherModal);
 $('btnTeacherFallback').addEventListener('click', openTeacherModal);

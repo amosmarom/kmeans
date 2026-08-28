@@ -41,33 +41,6 @@
       "defaultK": 1,
       "defaultMinMax": false,
       "defaultShowLines": true
-    },
-    {
-      "id": "custom_1787930114231",
-      "title": "7",
-      "description": "",
-      "dataset": "auto_villages_data_25pct",
-      "defaultK": 3,
-      "defaultMinMax": false,
-      "defaultShowLines": true
-    },
-    {
-      "id": "custom_1787930206624",
-      "title": "8",
-      "description": "",
-      "dataset": "geoCities",
-      "defaultK": 3,
-      "defaultMinMax": false,
-      "defaultShowLines": true
-    },
-    {
-      "id": "custom_1787930271123",
-      "title": "8",
-      "description": "",
-      "dataset": "plainBlobs",
-      "defaultK": 3,
-      "defaultMinMax": false,
-      "defaultShowLines": true
     }
   ]
 }

@@ -59,6 +59,15 @@
       "defaultK": 3,
       "defaultMinMax": false,
       "defaultShowLines": true
+    },
+    {
+      "id": "custom_1787930271123",
+      "title": "8",
+      "description": "",
+      "dataset": "plainBlobs",
+      "defaultK": 3,
+      "defaultMinMax": false,
+      "defaultShowLines": true
     }
   ]
 }

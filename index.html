@@ -399,7 +399,7 @@
         </div>
         <div class="hint" id="ghTokenStatus" style="margin-top:6px;"></div>
 
-        <h3 style="margin-top:22px;">יצירת תרחיש חדש</h3>
+        <h3 style="margin-top:22px;" id="scenarioFormTitle">יצירת תרחיש חדש</h3>
         <label class="field">
           <span class="lbl">שם התרחיש (יופיע בתפריט הראשי)</span>
           <input type="text" id="newScenarioName" placeholder="לדוגמה: שאלה 2 · אשכולות לקוחות">
@@ -422,8 +422,11 @@
         </label>
         <label class="tm-check"><input type="checkbox" id="newScenarioMinMax"> Min-Max כברירת מחדל</label>
         <label class="tm-check"><input type="checkbox" id="newScenarioLines" checked> הצג קווי מרחק כברירת מחדל</label>
-        <button class="btn-full primary" id="btnAddScenario" style="margin-top:6px;">➕ הוסף תרחיש לתפריט</button>
-        <div class="hint" style="margin-top:10px;">התרחיש נשמר אוטומטית בדפדפן הזה ויישאר גם אחרי רענון או סגירה. אם הגדרתם טוקן GitHub למעלה, הוא גם יסונכרן אוטומטית ל-<code>catalog.json</code> ויופיע לתלמידים. בלי טוקן, השמירה מקומית בלבד — ייצאו קונפיגורציה (למטה) או העתיקו ידנית ל-<code>catalog.json</code> כדי לפרסם.</div>
+        <div class="row" style="gap:8px; margin-top:6px;">
+          <button class="btn-full primary" id="btnAddScenario" style="flex:1;">➕ הוסף תרחיש לתפריט</button>
+          <button type="button" class="small" id="btnCancelEditScenario" style="display:none; flex:0 0 auto;">ביטול עריכה</button>
+        </div>
+        <div class="hint" id="scenarioFormHint" style="margin-top:10px;">התרחיש נשמר אוטומטית בדפדפן הזה ויישאר גם אחרי רענון או סגירה. אם הגדרתם טוקן GitHub למעלה, הוא גם יסונכרן אוטומטית ל-<code>catalog.json</code> ויופיע לתלמידים. בלי טוקן, השמירה מקומית בלבד — ייצאו קונפיגורציה (למטה) או העתיקו ידנית ל-<code>catalog.json</code> כדי לפרסם.</div>
       </div>
     </div>
     <div class="teacher-modal-actions">
@@ -975,7 +978,24 @@ async function loadCatalog(){
 }
 
 function findDataset(id){ return mergedDatasets().find(d=>d.id===id); }
-function findScenario(id){ return CATALOG.scenarios.find(s=>s.id===id) || teacherConfig.customScenarios.find(s=>s.id===id); }
+
+// Scenarios are one uniform concept to the teacher regardless of where they
+// currently live: already published in catalog.json on GitHub, edited locally
+// pending a re-sync, brand new and not yet synced, or deleted locally pending
+// a sync'd removal. This merges all of that bookkeeping into a single flat
+// list so the rest of the UI never has to think about origin.
+function effectiveScenarios(){
+  const deleted = new Set(teacherConfig.deletedScenarioIds);
+  const fromCatalog = CATALOG.scenarios
+    .filter(s=>!deleted.has(s.id))
+    .map(s=>{
+      const override = teacherConfig.scenarioOverrides[s.id];
+      return override ? {...s, ...override, origin:'catalog', pendingSync:true} : {...s, origin:'catalog', pendingSync:false};
+    });
+  const fromCustom = teacherConfig.customScenarios.map(s=>({...s, origin:'custom', pendingSync:true}));
+  return [...fromCatalog, ...fromCustom];
+}
+function findScenario(id){ return effectiveScenarios().find(s=>s.id===id); }
 
 // ---------------- Live data/ folder listing (GitHub API) ----------------
 // catalog.json is a manually-maintained manifest, which means a CSV pushed to
@@ -1041,33 +1061,23 @@ function mergedDatasets(){
   return merged;
 }
 
-// Builds the main dropdown from *authored scenarios only* — scenarios pre-defined
-// in catalog.json, plus any the teacher created live in the config panel. Raw
-// files in /data are never listed directly; they only become selectable once a
-// scenario wraps them with a name, a K, and Min-Max/lines defaults.
+// Builds the main dropdown from *authored scenarios only* — every scenario
+// the teacher has built, one flat list regardless of where it's stored. Raw
+// files in /data are never listed directly; they only become selectable once
+// a scenario wraps them with a name, a K, and Min-Max/lines defaults.
 function rebuildScenarioOptions(){
   const sel = $('scenarioSelect');
   const prevVal = sel.value;
   sel.innerHTML = '<option value="free">— מצב חופשי (ללא תרחיש) —</option>';
 
-  const visibleCatalog = CATALOG.scenarios.filter(sc=>teacherConfig.scenarioVisibility[sc.id] !== false);
-  if(visibleCatalog.length){
-    const og = document.createElement('optgroup'); og.label = 'תרחישי לימוד מוגדרים מראש';
-    visibleCatalog.forEach(sc=>{
+  const visible = effectiveScenarios().filter(sc=>teacherConfig.scenarioVisibility[sc.id] !== false);
+  if(visible.length){
+    const og = document.createElement('optgroup'); og.label = 'תרחישי לימוד';
+    visible.forEach(sc=>{
       const o = document.createElement('option'); o.value = sc.id; o.textContent = sc.title;
       og.appendChild(o);
     });
     sel.appendChild(og);
-  }
-
-  const visibleCustom = teacherConfig.customScenarios.filter(sc=>teacherConfig.scenarioVisibility[sc.id] !== false);
-  if(visibleCustom.length){
-    const og2 = document.createElement('optgroup'); og2.label = 'תרחישים שנוצרו על ידי המורה';
-    visibleCustom.forEach(sc=>{
-      const o = document.createElement('option'); o.value = sc.id; o.textContent = sc.title;
-      og2.appendChild(o);
-    });
-    sel.appendChild(og2);
   }
 
   // keep the current selection if it's still a valid option, otherwise fall back to free
@@ -1121,7 +1131,9 @@ const teacherConfig = {
     linesToggle:true, minmaxToggle:true, silhouetteToggle:true, aboutPanel:true, resetButton:true
   },
   scenarioVisibility: {},   // scenario id -> shown to student (default true)
-  customScenarios: []       // scenarios created live: {id, title, description, dataset, defaultK, defaultMinMax, defaultShowLines}
+  customScenarios: [],      // scenarios created live and not yet synced to catalog.json: {id, title, description, dataset, defaultK, defaultMinMax, defaultShowLines}
+  scenarioOverrides: {},    // scenario id -> field edits made locally to a catalog.json-origin scenario, pending sync
+  deletedScenarioIds: []    // ids of catalog.json-origin scenarios deleted locally but not yet confirmed deleted on GitHub
 };
 
 // Custom scenarios only exist in memory otherwise, so a page refresh would
@@ -1134,7 +1146,9 @@ function saveTeacherConfigToStorage(){
     localStorage.setItem(TEACHER_STORAGE_KEY, JSON.stringify({
       visible: teacherConfig.visible,
       scenarioVisibility: teacherConfig.scenarioVisibility,
-      customScenarios: teacherConfig.customScenarios
+      customScenarios: teacherConfig.customScenarios,
+      scenarioOverrides: teacherConfig.scenarioOverrides,
+      deletedScenarioIds: teacherConfig.deletedScenarioIds
     }));
   }catch(e){ /* private browsing / storage disabled -- fall back to in-memory only */ }
 }
@@ -1146,6 +1160,8 @@ function loadTeacherConfigFromStorage(){
     if(cfg.visible) Object.assign(teacherConfig.visible, cfg.visible);
     if(cfg.scenarioVisibility) Object.assign(teacherConfig.scenarioVisibility, cfg.scenarioVisibility);
     if(Array.isArray(cfg.customScenarios)) teacherConfig.customScenarios = cfg.customScenarios;
+    if(cfg.scenarioOverrides) Object.assign(teacherConfig.scenarioOverrides, cfg.scenarioOverrides);
+    if(Array.isArray(cfg.deletedScenarioIds)) teacherConfig.deletedScenarioIds = cfg.deletedScenarioIds;
   }catch(e){ /* corrupt/unavailable storage -- start from defaults */ }
 }
 loadTeacherConfigFromStorage();
@@ -1179,9 +1195,11 @@ function base64ToUtf8(b64){
   return new TextDecoder().decode(bytes);
 }
 
-// Commits `scenario` into catalog.json's scenarios array on the main branch
-// via the GitHub Contents API. Returns {ok:true} or {ok:false, message}.
-async function pushScenarioToGitHub(scenario){
+// Fetches catalog.json from GitHub, lets `mutate` change its parsed contents
+// in place (add/update/remove a scenario), then commits the result back to
+// main via the GitHub Contents API. Returns {ok:true} or {ok:false, message}.
+// Every create/edit/delete sync goes through this one path.
+async function commitCatalogChange(mutate, commitMessage){
   const repoInfo = detectGitHubRepo();
   if(!repoInfo) return {ok:false, message:'לא ניתן לזהות את הריפו (הוסיפו "githubRepo" ל-catalog.json).'};
   const token = getGitHubToken();
@@ -1197,12 +1215,12 @@ async function pushScenarioToGitHub(scenario){
     const getData = await getRes.json();
     const current = JSON.parse(base64ToUtf8(getData.content));
     if(!Array.isArray(current.scenarios)) current.scenarios = [];
-    current.scenarios.push(scenario);
+    mutate(current);
     const putRes = await fetch(apiUrl, {
       method:'PUT',
       headers:{ Authorization:`token ${token}`, Accept:'application/vnd.github+json', 'Content-Type':'application/json' },
       body: JSON.stringify({
-        message: `Add scenario: ${scenario.title}`,
+        message: commitMessage,
         content: utf8ToBase64(JSON.stringify(current, null, 2) + '\n'),
         sha: getData.sha,
         branch: 'main'
@@ -1218,6 +1236,19 @@ async function pushScenarioToGitHub(scenario){
   }catch(err){
     return {ok:false, message:'שגיאת רשת בעת הגישה ל-GitHub API.'};
   }
+}
+
+function pushScenarioToGitHub(scenario){
+  return commitCatalogChange(cat=>{ cat.scenarios.push(scenario); }, `Add scenario: ${scenario.title}`);
+}
+function updateScenarioOnGitHub(id, fields){
+  return commitCatalogChange(cat=>{
+    const idx = cat.scenarios.findIndex(s=>s.id===id);
+    if(idx>=0) cat.scenarios[idx] = {...cat.scenarios[idx], ...fields};
+  }, `Edit scenario: ${fields.title || id}`);
+}
+function deleteScenarioOnGitHub(id, title){
+  return commitCatalogChange(cat=>{ cat.scenarios = cat.scenarios.filter(s=>s.id!==id); }, `Delete scenario: ${title || id}`);
 }
 
 function updateGhTokenStatus(){
@@ -1261,12 +1292,11 @@ function populateTeacherModalInputs(){
   });
   fileSel.value = [...fileSel.options].some(o=>o.value===prevFileVal) ? prevFileVal : '';
 
-  // scenario management list: catalog-authored (visibility toggle only) + custom (toggle + delete)
+  // scenario management list: one uniform list, one uniform set of actions
+  // (edit, delete, and sync-when-pending) regardless of where a scenario
+  // currently lives -- catalog.json on GitHub or only in this browser.
   const list = $('tmScenarioList'); list.innerHTML = '';
-  const all = [
-    ...CATALOG.scenarios.map(s=>({...s, origin:'catalog'})),
-    ...teacherConfig.customScenarios.map(s=>({...s, origin:'custom'}))
-  ];
+  const all = effectiveScenarios();
   if(all.length===0){
     const p = document.createElement('div'); p.className='hint'; p.textContent='אין עדיין תרחישים. צרו אחד בטופס משמאל.';
     list.appendChild(p);
@@ -1275,13 +1305,17 @@ function populateTeacherModalInputs(){
   all.forEach(sc=>{
     const visible = teacherConfig.scenarioVisibility[sc.id] !== false;
     const row = document.createElement('div'); row.className = 'tm-scenario-row';
+    const statusText = sc.pendingSync
+      ? (sc.origin==='custom' ? 'נוצר על ידך · לא סונכרן ל-GitHub' : 'נערך מקומית · לא סונכרן ל-GitHub')
+      : 'מסונכרן עם catalog.json';
     row.innerHTML = `
       <label class="tm-check">
         <input type="checkbox" data-scenariovis="${sc.id}" ${visible?'checked':''}>
-        <span>${sc.title}<br><span class="hint">${sc.origin==='catalog' ? 'מוגדר מראש (catalog.json)' : 'נוצר על ידך · לא סונכרן ל-GitHub'} · קובץ: ${sc.dataset}</span></span>
+        <span>${sc.title}<br><span class="hint">${statusText} · קובץ: ${sc.dataset}</span></span>
       </label>
-      ${sc.origin==='custom' ? `<button class="small" data-sync-scenario="${sc.id}" title="סנכרון ל-GitHub (catalog.json)">🔄</button>` : ''}
-      ${sc.origin==='custom' ? `<button class="small" data-del-scenario="${sc.id}" title="מחק תרחיש">✕</button>` : ''}
+      ${sc.pendingSync ? `<button class="small" data-sync-scenario="${sc.id}" title="סנכרון ל-GitHub (catalog.json)">🔄</button>` : ''}
+      <button class="small" data-edit-scenario="${sc.id}" title="עריכת תרחיש">✎</button>
+      <button class="small" data-del-scenario="${sc.id}" title="מחק תרחיש">✕</button>
     `;
     list.appendChild(row);
   });
@@ -1314,16 +1348,28 @@ $('teacherModal').addEventListener('change', e=>{
     saveTeacherConfigToStorage();
   }
 });
-// Attempts to publish a locally-created scenario to GitHub. On success it's
-// moved out of customScenarios into CATALOG.scenarios (it's now genuinely
-// catalog-authored, just written by the app instead of by hand). On failure
-// it stays in customScenarios so the teacher can retry via the 🔄 button.
-async function trySyncCustomScenario(sc, {silent}={}){
+// Publishes a pending local change (new scenario, or an edit to a
+// catalog.json-origin one) to GitHub. On success the local pending state is
+// cleared and folded into CATALOG.scenarios; on failure it's left pending so
+// the teacher can retry via the 🔄 button.
+async function trySyncScenario(sc, {silent}={}){
   if(!silent) setStatus(`מסנכרן את "${sc.title}" ל-GitHub…`);
-  const result = await pushScenarioToGitHub(sc);
+  const fields = {
+    title: sc.title, description: sc.description, dataset: sc.dataset,
+    defaultK: sc.defaultK, defaultMinMax: sc.defaultMinMax, defaultShowLines: sc.defaultShowLines
+  };
+  const result = sc.origin === 'custom'
+    ? await pushScenarioToGitHub({ id: sc.id, ...fields })
+    : await updateScenarioOnGitHub(sc.id, fields);
   if(result.ok){
-    teacherConfig.customScenarios = teacherConfig.customScenarios.filter(s=>s.id!==sc.id);
-    if(!CATALOG.scenarios.some(s=>s.id===sc.id)) CATALOG.scenarios.push(sc);
+    if(sc.origin === 'custom'){
+      teacherConfig.customScenarios = teacherConfig.customScenarios.filter(s=>s.id!==sc.id);
+      if(!CATALOG.scenarios.some(s=>s.id===sc.id)) CATALOG.scenarios.push({ id: sc.id, ...fields });
+    }else{
+      const idx = CATALOG.scenarios.findIndex(s=>s.id===sc.id);
+      if(idx>=0) CATALOG.scenarios[idx] = {...CATALOG.scenarios[idx], ...fields};
+      delete teacherConfig.scenarioOverrides[sc.id];
+    }
     populateTeacherModalInputs();
     rebuildScenarioOptions();
     saveTeacherConfigToStorage();
@@ -1335,23 +1381,88 @@ async function trySyncCustomScenario(sc, {silent}={}){
   return result;
 }
 
+// Deletes a scenario. custom-origin scenarios never made it to GitHub, so
+// removing them locally is enough. catalog-origin scenarios are actually
+// deleted from catalog.json when a token is available; without one (or on
+// failure) the deletion is only local -- this browser stops offering it, but
+// it's still on GitHub until someone with a token deletes it for real.
+async function deleteScenario(sc){
+  if(sc.origin === 'custom'){
+    teacherConfig.customScenarios = teacherConfig.customScenarios.filter(s=>s.id!==sc.id);
+    delete teacherConfig.scenarioVisibility[sc.id];
+    populateTeacherModalInputs(); rebuildScenarioOptions(); saveTeacherConfigToStorage();
+    setStatus(`התרחיש "${sc.title}" נמחק.`);
+    return;
+  }
+  if(getGitHubToken()){
+    setStatus(`מוחק את "${sc.title}" מ-GitHub…`);
+    const result = await deleteScenarioOnGitHub(sc.id, sc.title);
+    if(result.ok){
+      CATALOG.scenarios = CATALOG.scenarios.filter(s=>s.id!==sc.id);
+      delete teacherConfig.scenarioOverrides[sc.id];
+      delete teacherConfig.scenarioVisibility[sc.id];
+      populateTeacherModalInputs(); rebuildScenarioOptions(); saveTeacherConfigToStorage();
+      setStatus(`התרחיש "${sc.title}" נמחק מ-GitHub ולא יופיע יותר לתלמידים.`);
+      return;
+    }
+    setStatus(`מחיקה מ-GitHub נכשלה (${result.message}) — התרחיש הוסתר מקומית בדפדפן זה בלבד.`);
+  }else{
+    setStatus(`התרחיש הוסתר מקומית בדפדפן זה בלבד (הגדירו טוקן GitHub כדי למחוק גם מ-GitHub).`);
+  }
+  if(!teacherConfig.deletedScenarioIds.includes(sc.id)) teacherConfig.deletedScenarioIds.push(sc.id);
+  delete teacherConfig.scenarioOverrides[sc.id];
+  delete teacherConfig.scenarioVisibility[sc.id];
+  populateTeacherModalInputs(); rebuildScenarioOptions(); saveTeacherConfigToStorage();
+}
+
+// The create-scenario form doubles as the edit form: editingScenarioId tracks
+// which scenario (if any) is being edited, null meaning "create new".
+let editingScenarioId = null;
+const SCENARIO_FORM_HINT_CREATE = 'התרחיש נשמר אוטומטית בדפדפן הזה ויישאר גם אחרי רענון או סגירה. אם הגדרתם טוקן GitHub למעלה, הוא גם יסונכרן אוטומטית ל-<code>catalog.json</code> ויופיע לתלמידים. בלי טוקן, השמירה מקומית בלבד — ייצאו קונפיגורציה (למטה) או העתיקו ידנית ל-<code>catalog.json</code> כדי לפרסם.';
+function startEditScenario(id){
+  const sc = findScenario(id);
+  if(!sc) return;
+  editingScenarioId = id;
+  $('scenarioFormTitle').textContent = `עריכת תרחיש: ${sc.title}`;
+  $('newScenarioName').value = sc.title;
+  $('newScenarioDesc').value = sc.description || '';
+  $('newScenarioK').value = sc.defaultK != null ? sc.defaultK : 3;
+  $('newScenarioMinMax').checked = !!sc.defaultMinMax;
+  $('newScenarioLines').checked = sc.defaultShowLines !== false;
+  const fileSel = $('newScenarioFile');
+  if([...fileSel.options].some(o=>o.value===sc.dataset)) fileSel.value = sc.dataset;
+  $('btnAddScenario').textContent = '💾 עדכון תרחיש';
+  $('btnCancelEditScenario').style.display = '';
+  $('scenarioFormHint').innerHTML = 'שינויים בתרחיש קיים יסונכרנו ל-GitHub אם הוגדר טוקן, אחרת יישמרו מקומית בלבד עד לסנכרון.';
+}
+function cancelEditScenario(){
+  editingScenarioId = null;
+  $('scenarioFormTitle').textContent = 'יצירת תרחיש חדש';
+  $('newScenarioName').value=''; $('newScenarioDesc').value=''; $('newScenarioFile').value='';
+  $('newScenarioK').value='3'; $('newScenarioMinMax').checked=false; $('newScenarioLines').checked=true;
+  $('btnAddScenario').textContent = '➕ הוסף תרחיש לתפריט';
+  $('btnCancelEditScenario').style.display = 'none';
+  $('scenarioFormHint').innerHTML = SCENARIO_FORM_HINT_CREATE;
+}
+
 $('teacherModal').addEventListener('click', e=>{
   if(e.target.dataset && e.target.dataset.delScenario){
     const id = e.target.dataset.delScenario;
-    teacherConfig.customScenarios = teacherConfig.customScenarios.filter(s=>s.id!==id);
-    delete teacherConfig.scenarioVisibility[id];
-    populateTeacherModalInputs();
-    rebuildScenarioOptions();
-    saveTeacherConfigToStorage();
+    const sc = findScenario(id);
+    if(sc) deleteScenario(sc);
+    if(editingScenarioId === id) cancelEditScenario();
   }
   if(e.target.dataset && e.target.dataset.syncScenario){
-    const id = e.target.dataset.syncScenario;
-    const sc = teacherConfig.customScenarios.find(s=>s.id===id);
+    const sc = findScenario(e.target.dataset.syncScenario);
     if(!sc) return;
     if(!getGitHubToken()){ setStatus('הגדירו טוקן GitHub למעלה לפני סנכרון.'); return; }
-    trySyncCustomScenario(sc);
+    trySyncScenario(sc);
+  }
+  if(e.target.dataset && e.target.dataset.editScenario){
+    startEditScenario(e.target.dataset.editScenario);
   }
 });
+$('btnCancelEditScenario').addEventListener('click', cancelEditScenario);
 $('btnSaveGhToken').addEventListener('click', ()=>{
   const token = $('ghTokenInput').value.trim();
   if(!token){ setStatus('הזינו טוקן לפני שמירה.'); return; }
@@ -1371,27 +1482,53 @@ $('btnAddScenario').addEventListener('click', async ()=>{
   const fileId = $('newScenarioFile').value;
   if(!name){ setStatus('יש להזין שם לתרחיש.'); return; }
   if(!fileId){ setStatus('יש לבחור קובץ מתיקיית data.'); return; }
-  const id = 'custom_' + Date.now();
   const kVal = Math.max(1, Math.min(10, parseInt($('newScenarioK').value, 10) || 3));
-  const scenario = {
-    id, title: name,
+  const fields = {
+    title: name,
     description: $('newScenarioDesc').value.trim(),
     dataset: fileId,
     defaultK: kVal,
     defaultMinMax: $('newScenarioMinMax').checked,
     defaultShowLines: $('newScenarioLines').checked
   };
+
+  if(editingScenarioId){
+    const id = editingScenarioId;
+    const existing = findScenario(id);
+    if(!existing){ setStatus('התרחיש הנערך נמחק בינתיים.'); cancelEditScenario(); return; }
+    if(existing.origin === 'custom'){
+      const idx = teacherConfig.customScenarios.findIndex(s=>s.id===id);
+      if(idx>=0) teacherConfig.customScenarios[idx] = { id, ...fields };
+    }else{
+      teacherConfig.scenarioOverrides[id] = fields;
+    }
+    saveTeacherConfigToStorage();
+    cancelEditScenario();
+    populateTeacherModalInputs();
+    rebuildScenarioOptions();
+
+    if(getGitHubToken()){
+      $('btnAddScenario').disabled = true;
+      await trySyncScenario(findScenario(id), {silent:true});
+      $('btnAddScenario').disabled = false;
+    }else{
+      setStatus(`התרחיש "${name}" עודכן ונשמר בדפדפן הזה. הגדירו טוקן GitHub כדי לסנכרן את השינוי ל-GitHub.`);
+    }
+    return;
+  }
+
+  const id = 'custom_' + Date.now();
+  const scenario = { id, ...fields };
   teacherConfig.customScenarios.push(scenario);
   teacherConfig.scenarioVisibility[id] = true;
-  $('newScenarioName').value=''; $('newScenarioDesc').value=''; $('newScenarioFile').value='';
-  $('newScenarioK').value='3'; $('newScenarioMinMax').checked=false; $('newScenarioLines').checked=true;
+  cancelEditScenario();
   populateTeacherModalInputs();
   rebuildScenarioOptions();
   saveTeacherConfigToStorage();
 
   if(getGitHubToken()){
     $('btnAddScenario').disabled = true;
-    await trySyncCustomScenario(scenario, {silent:true});
+    await trySyncScenario({ ...scenario, origin:'custom' }, {silent:true});
     $('btnAddScenario').disabled = false;
   }else{
     setStatus(`התרחיש "${name}" נוצר ומופיע כעת בתפריט הראשי, ונשמר אוטומטית בדפדפן הזה. הגדירו טוקן GitHub למעלה כדי לסנכרן אוטומטית גם לתלמידים.`);
@@ -1407,7 +1544,13 @@ $('btnTeacherReset').addEventListener('click', ()=>{
   saveTeacherConfigToStorage();
 });
 $('btnTeacherExport').addEventListener('click', ()=>{
-  const cfg = { visible: teacherConfig.visible, scenarioVisibility: teacherConfig.scenarioVisibility, customScenarios: teacherConfig.customScenarios };
+  const cfg = {
+    visible: teacherConfig.visible,
+    scenarioVisibility: teacherConfig.scenarioVisibility,
+    customScenarios: teacherConfig.customScenarios,
+    scenarioOverrides: teacherConfig.scenarioOverrides,
+    deletedScenarioIds: teacherConfig.deletedScenarioIds
+  };
   const blob = new Blob([JSON.stringify(cfg, null, 2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href=url; a.download='kmenas_config.json';
@@ -1423,6 +1566,8 @@ $('teacherImportInput').addEventListener('change', e=>{
       if(cfg.visible) Object.assign(teacherConfig.visible, cfg.visible);
       if(cfg.scenarioVisibility) Object.assign(teacherConfig.scenarioVisibility, cfg.scenarioVisibility);
       if(Array.isArray(cfg.customScenarios)) teacherConfig.customScenarios = cfg.customScenarios;
+      if(cfg.scenarioOverrides) Object.assign(teacherConfig.scenarioOverrides, cfg.scenarioOverrides);
+      if(Array.isArray(cfg.deletedScenarioIds)) teacherConfig.deletedScenarioIds = cfg.deletedScenarioIds;
       applyTeacherConfig(); populateTeacherModalInputs();
       saveTeacherConfigToStorage();
       setStatus('קונפיגורציה נטענה בהצלחה.');

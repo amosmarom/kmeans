@@ -47,6 +47,7 @@
   .brand .sub{ color:var(--muted); font-size:12.5px; }
 
   .telemetry{ display:flex; align-items:center; gap:18px; }
+  .telemetry-readouts{ display:flex; align-items:center; gap:18px; }
   .readout{ text-align:center; }
   .readout .label{ font-size:10px; color:var(--muted); letter-spacing:1.5px; text-transform:uppercase; }
   .readout .val{ font-family:var(--mono); font-size:20px; font-weight:700; color:var(--cyan); }
@@ -222,15 +223,17 @@
     </div>
   </div>
   <div class="telemetry">
-    <div class="readout">
-      <div class="label">איטרציה</div>
-      <div class="val" id="iterReadout">0</div>
+    <div id="ctrlTelemetry" class="telemetry-readouts">
+      <div class="readout">
+        <div class="label">איטרציה</div>
+        <div class="val" id="iterReadout">0</div>
+      </div>
+      <div class="readout">
+        <div class="label">סה״כ מרחק (WCSS)</div>
+        <div class="val" id="wcssReadout">–</div>
+      </div>
+      <div class="trace-box"><svg id="traceSvg" viewBox="0 0 150 38" preserveAspectRatio="none"></svg></div>
     </div>
-    <div class="readout">
-      <div class="label">סה״כ מרחק (WCSS)</div>
-      <div class="val" id="wcssReadout">–</div>
-    </div>
-    <div class="trace-box"><svg id="traceSvg" viewBox="0 0 150 38" preserveAspectRatio="none"></svg></div>
     <button class="reset-btn" id="btnReset" title="איפוס מלא של הסימולטור">⟲ איפוס</button>
   </div>
 </header>
@@ -339,7 +342,7 @@
 
   <!-- RIGHT: stats -->
   <div class="sidebar-right">
-    <div class="panel">
+    <div class="panel" id="panelStats">
       <h2>סטטיסטיקת אשכולות</h2>
       <table class="stats">
         <thead><tr><th>#</th><th>נקודות</th><th>סכום מרחק</th><th>ממוצע</th></tr></thead>
@@ -398,6 +401,7 @@
         <label class="tm-check"><input type="checkbox" data-vis="linesToggle"> קווי מרחק לצנטרואיד</label>
         <label class="tm-check"><input type="checkbox" data-vis="minmaxToggle"> נרמול Min-Max</label>
         <label class="tm-check"><input type="checkbox" data-vis="silhouetteToggle"> ניתוח סילואט</label>
+        <label class="tm-check"><input type="checkbox" data-vis="statsSection"> סטטיסטיקת אשכולות (כולל WCSS ואיטרציות)</label>
         <label class="tm-check"><input type="checkbox" data-vis="aboutPanel"> פאנל "אודות המודל"</label>
         <label class="tm-check"><input type="checkbox" data-vis="resetButton"> כפתור איפוס</label>
 
@@ -1191,7 +1195,8 @@ const teacherConfig = {
   visible: {
     scenarioPanel:true, fileUpload:true, columnSelectors:true,
     kControl:true, reinitButton:true, runButtons:true, speedControl:true,
-    linesToggle:true, minmaxToggle:true, silhouetteToggle:true, aboutPanel:true, resetButton:true
+    linesToggle:true, minmaxToggle:true, silhouetteToggle:true, statsSection:true,
+    aboutPanel:true, resetButton:true
   },
   scenarioVisibility: {},   // scenario id -> shown to student (default true)
   customScenarios: [],      // scenarios created live and not yet synced to catalog.json: {id, title, description, dataset, defaultK, defaultMinMax, defaultShowLines}
@@ -1321,17 +1326,24 @@ function updateGhTokenStatus(){
     : 'לא הוגדר טוקן — תרחישים חדשים יישמרו בדפדפן זה בלבד.';
 }
 
+// Each key maps to one element id, or an array of ids when a single toggle
+// needs to hide several disjoint parts of the page together (e.g. the stats
+// panel in the right sidebar plus the WCSS/iteration readouts in the header).
 const VIS_TARGETS = {
   scenarioPanel:'panelScenario', fileUpload:'ctrlFileUpload',
   kControl:'ctrlKControl', reinitButton:'btnReinit', runButtons:'ctrlRunButtons',
   speedControl:'ctrlSpeedControl', linesToggle:'btnLines', minmaxToggle:'btnMinMax',
-  silhouetteToggle:'btnSilhouette', aboutPanel:'panelAbout', resetButton:'btnReset'
+  silhouetteToggle:'btnSilhouette', statsSection:['panelStats','ctrlTelemetry'],
+  aboutPanel:'panelAbout', resetButton:'btnReset'
 };
 
 function applyTeacherConfig(){
   Object.keys(VIS_TARGETS).forEach(k=>{
-    const el = $(VIS_TARGETS[k]);
-    if(el) el.style.display = teacherConfig.visible[k] ? '' : 'none';
+    const ids = [].concat(VIS_TARGETS[k]);
+    ids.forEach(id=>{
+      const el = $(id);
+      if(el) el.style.display = teacherConfig.visible[k] ? '' : 'none';
+    });
   });
   if(state.rows && state.rows.length) populateColumnUI();
   else $('colSelectors').style.display = 'none';
@@ -1752,6 +1764,7 @@ $('btnReset').addEventListener('click', resetAll);
 // init
 $('kValue').textContent = state.k;
 render();
+applyTeacherConfig(); // apply any visibility choices restored from localStorage
 const catalogReady = loadCatalog();
 catalogReady.then(()=>{ fetchLiveDataFiles(); }); // warm the live /data listing early, not just on teacher-panel open
 })();

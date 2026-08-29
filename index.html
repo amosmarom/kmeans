@@ -229,7 +229,7 @@
         <div class="val" id="iterReadout">0</div>
       </div>
       <div class="readout">
-        <div class="label">סה״כ מרחק (WCSS)</div>
+        <div class="label" id="wcssLabel">סה״כ מרחק (WCSS)</div>
         <div class="val" id="wcssReadout">–</div>
       </div>
       <div class="trace-box"><svg id="traceSvg" viewBox="0 0 150 38" preserveAspectRatio="none"></svg></div>
@@ -345,11 +345,11 @@
     <div class="panel" id="panelStats">
       <h2>סטטיסטיקת אשכולות</h2>
       <table class="stats">
-        <thead><tr><th>#</th><th>נקודות</th><th>סכום מרחק</th><th>ממוצע</th></tr></thead>
+        <thead><tr><th>#</th><th>נקודות</th><th id="statsSumHeader">סכום מרחק</th><th>ממוצע</th></tr></thead>
         <tbody id="statsBody"></tbody>
       </table>
       <div class="total-line">
-        <span class="t-label">סה״כ סכום מרחקים</span>
+        <span class="t-label" id="totalSumLabel">סה״כ סכום מרחקים</span>
         <span class="t-val" id="totalSum">–</span>
       </div>
     </div>
@@ -555,6 +555,17 @@ function updateModeHint(){
   $('modeHint').textContent = state.vizMode==='map'
     ? `אשכול במרחב הגיאוגרפי (${state.lonCol} / ${state.latCol})`
     : (state.xCol ? `אשכול לפי: ${state.xCol} × ${state.yCol}` : '');
+  updateDistanceUnitLabels();
+}
+
+// Distance totals switch to km once displayDist() starts computing real-world
+// distance (map mode); labels follow so the numbers aren't mistaken for the
+// raw lon/lat degree-distance shown in scatter mode.
+function updateDistanceUnitLabels(){
+  const isMap = (state.vizMode==='map' && state.geoAvailable);
+  $('wcssLabel').textContent = isMap ? 'סה״כ מרחק (WCSS) בק״מ' : 'סה״כ מרחק (WCSS)';
+  $('statsSumHeader').textContent = isMap ? 'סכום מרחק (ק״מ)' : 'סכום מרחק';
+  $('totalSumLabel').textContent = isMap ? 'סה״כ סכום מרחקים (ק״מ)' : 'סה״כ סכום מרחקים';
 }
 
 // ---------------- Build feature points ----------------
@@ -650,6 +661,23 @@ $('btnClosePointInfo').addEventListener('click', hidePointInfo);
 // ---------------- K-Means core ----------------
 function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
 
+// Distance for display totals (WCSS, per-cluster sums/averages): in map mode
+// a/b are lon/lat degrees, where 1° of longitude and 1° of latitude cover
+// very different real-world distances, so plain Euclidean degree-distance is
+// meaningless as "km". This converts to a local equirectangular km distance
+// instead. Clustering itself (assign/updateCentroids) intentionally keeps
+// using plain dist() in degree-space, so switching this doesn't change which
+// points get assigned to which cluster -- only how the totals are reported.
+function displayDist(a,b){
+  if(state.vizMode==='map' && state.geoAvailable){
+    const avgLatRad = (a.y+b.y)/2 * Math.PI/180;
+    const dxKm = (a.x-b.x) * 111.320 * Math.cos(avgLatRad);
+    const dyKm = (a.y-b.y) * 110.574;
+    return Math.hypot(dxKm, dyKm);
+  }
+  return dist(a,b);
+}
+
 function initCentroids(){
   if(state.points.length===0){ state.centroids=[]; return; }
   const shuffled = [...state.points].sort(()=>Math.random()-0.5);
@@ -680,7 +708,7 @@ function updateCentroids(){
 
 function computeStats(){
   const sums = state.centroids.map(()=>({sum:0,n:0}));
-  state.points.forEach(p=>{ if(p.cluster>=0){ sums[p.cluster].sum += dist(p, state.centroids[p.cluster]); sums[p.cluster].n++; } });
+  state.points.forEach(p=>{ if(p.cluster>=0){ sums[p.cluster].sum += displayDist(p, state.centroids[p.cluster]); sums[p.cluster].n++; } });
   const total = sums.reduce((a,s)=>a+s.sum,0);
   return {sums, total};
 }
@@ -1755,6 +1783,7 @@ function resetAll(){
   $('statsBody').innerHTML=''; $('totalSum').textContent='–';
   $('wcssReadout').textContent='–'; $('iterReadout').textContent='0';
   $('legendBox').innerHTML=''; $('modeHint').textContent='';
+  updateDistanceUnitLabels();
   $('dataHint').textContent = 'טרם נטענו נתונים. ניתן לטעון קובץ CSV עם עמודות מספריות, או להשתמש בנתוני דוגמה.';
   setStatus('הסימולטור אופס.');
   render();

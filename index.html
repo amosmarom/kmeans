@@ -134,6 +134,20 @@
   .swatch{ width:10px; height:10px; border-radius:50%; display:inline-block; }
   .viz-stage{ position:relative; width:100%; aspect-ratio:1/1; max-height:680px; margin:0 auto; flex:0 0 auto; }
   #svgStage, #mapStage{ position:absolute; inset:0; width:100%; height:100%; z-index:1; }
+  .point-info-box{
+    position:absolute; top:10px; right:10px; z-index:6; max-width:250px;
+    background:var(--panel2); border:1px solid var(--border); border-radius:6px;
+    padding:10px 30px 10px 12px; font-size:12px; line-height:1.6; color:var(--text);
+    box-shadow:0 4px 14px rgba(0,0,0,.4);
+  }
+  .point-info-box .pi-title{ font-weight:700; margin-bottom:4px; }
+  .point-info-box .pi-section{ margin-top:8px; padding-top:6px; border-top:1px solid var(--border); color:var(--muted); }
+  .point-info-box .pi-section b{ color:var(--text); font-weight:600; }
+  .point-info-close{
+    position:absolute; top:5px; left:6px; background:none; border:none; cursor:pointer;
+    color:var(--muted); font-size:13px; line-height:1; padding:3px 5px;
+  }
+  .point-info-close:hover{ color:var(--text); }
   #mapStage{ display:none; }
   #svgStage{ background:
       linear-gradient(var(--border) 1px, transparent 1px) 0 0/40px 40px,
@@ -311,6 +325,10 @@
     <div class="viz-stage">
       <svg id="svgStage" viewBox="0 0 700 700" preserveAspectRatio="xMidYMid meet"></svg>
       <div id="mapStage"></div>
+      <div class="point-info-box" id="pointInfoBox" style="display:none;">
+        <button class="point-info-close" id="btnClosePointInfo" title="סגירה">✕</button>
+        <div id="pointInfoContent"></div>
+      </div>
       <div class="empty-state" id="emptyState">
         <div class="big">◎</div>
         <div>אין עדיין נתונים להצגה</div>
@@ -537,6 +555,7 @@ function updateModeHint(){
 
 // ---------------- Build feature points ----------------
 function rebuildPoints(){
+  hidePointInfo();
   let xCol, yCol, isMap = (state.vizMode==='map' && state.geoAvailable);
   if(isMap){ xCol = state.lonCol; yCol = state.latCol; } else { xCol = state.xCol; yCol = state.yCol; }
   if(!xCol || !yCol){ state.points = []; return; }
@@ -582,6 +601,47 @@ function computeDomain(){
   const px=(xmax-xmin)*0.12 || 1, py=(ymax-ymin)*0.12 || 1;
   state.domain = { xmin:xmin-px, xmax:xmax+px, ymin:ymin-py, ymax:ymax+py };
 }
+
+// ---------------- Point info (click a point to see its coordinates) ----------------
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function fmtNum(v){ return (v==null || isNaN(v)) ? '–' : String(Math.round(v*10000)/10000); }
+
+// Centroid coordinates are stored min-max-normalized while state.minmax is on;
+// this reverses that so the info box always shows real-world units, matching
+// what a teacher/student actually typed or measured, not the 0-1 working space.
+function centroidOriginalCoords(c){
+  if(!state.minmax || !state.origDomain) return {x:c.x, y:c.y};
+  const d = state.origDomain;
+  return { x: c.x*(d.xmax-d.xmin)+d.xmin, y: c.y*(d.ymax-d.ymin)+d.ymin };
+}
+
+function showPointInfo(p){
+  const isMap = (state.vizMode==='map' && state.geoAvailable);
+  const xLabel = isMap ? (state.lonCol || 'X') : (state.xCol || 'X');
+  const yLabel = isMap ? (state.latCol || 'Y') : (state.yCol || 'Y');
+  const labelCol = state.headers.find(h=>!state.numericCols.includes(h));
+  const pointName = (labelCol && p.row[labelCol]) ? p.row[labelCol] : `נקודה #${p.id+1}`;
+
+  let html = `<div class="pi-title">${escapeHtml(pointName)}</div>`;
+  html += `<div>${escapeHtml(xLabel)}: ${fmtNum(p.ox)}</div>`;
+  html += `<div>${escapeHtml(yLabel)}: ${fmtNum(p.oy)}</div>`;
+
+  if(p.cluster>=0 && state.centroids[p.cluster]){
+    const oc = centroidOriginalCoords(state.centroids[p.cluster]);
+    html += `<div class="pi-section"><b>צנטרואיד ${p.cluster+1}</b></div>`;
+    html += `<div>${escapeHtml(xLabel)}: ${fmtNum(oc.x)}</div>`;
+    html += `<div>${escapeHtml(yLabel)}: ${fmtNum(oc.y)}</div>`;
+  }else{
+    html += `<div class="pi-section">טרם שויכה לאשכול</div>`;
+  }
+
+  $('pointInfoContent').innerHTML = html;
+  $('pointInfoBox').style.display = 'block';
+}
+function hidePointInfo(){ $('pointInfoBox').style.display = 'none'; }
+$('btnClosePointInfo').addEventListener('click', hidePointInfo);
 
 // ---------------- K-Means core ----------------
 function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
@@ -713,6 +773,8 @@ function renderSVG(){
     c.setAttribute('cx', sx(p.x)); c.setAttribute('cy', sy(p.y)); c.setAttribute('r','4.2');
     c.setAttribute('fill', p.cluster>=0 ? PALETTE[p.cluster % PALETTE.length] : '#5a6478');
     c.setAttribute('fill-opacity','0.85'); c.setAttribute('stroke','#0d1016'); c.setAttribute('stroke-width','0.6');
+    c.style.cursor = 'pointer';
+    c.addEventListener('click', e=>{ e.stopPropagation(); showPointInfo(p); });
     svg.appendChild(c);
   });
   state.centroids.forEach((c,ci)=>{
@@ -787,8 +849,9 @@ function renderMap(){
   const bounds = [];
   state.points.forEach(p=>{
     const color = p.cluster>=0 ? PALETTE[p.cluster % PALETTE.length] : '#5a6478';
-    const m = L.marker([p.y, p.x], {icon: coloredIcon(color,false), interactive:false}).addTo(state.map);
+    const m = L.marker([p.y, p.x], {icon: coloredIcon(color,false), interactive:true}).addTo(state.map);
     m._colorCluster = p.cluster;
+    m.on('click', ()=>showPointInfo(p));
     state.mapMarkers.push(m);
     bounds.push([p.y,p.x]);
   });
@@ -1655,6 +1718,7 @@ $('btnSilhouette').addEventListener('click', ()=>{
 
 function resetAll(){
   toggleRun(false);
+  hidePointInfo();
   if(state.map){ state.map.remove(); state.map = null; }
   state.headers=[]; state.rows=[]; state.numericCols=[]; state.latCol=null; state.lonCol=null;
   state.xCol=null; state.yCol=null; state.vizMode='scatter'; state.geoAvailable=false;

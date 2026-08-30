@@ -563,7 +563,7 @@ function updateModeHint(){
 // raw lon/lat degree-distance shown in scatter mode.
 function updateDistanceUnitLabels(){
   const isMap = (state.vizMode==='map' && state.geoAvailable);
-  $('wcssLabel').textContent = isMap ? 'סה״כ מרחק (WCSS) בק״מ' : 'סה״כ מרחק (WCSS)';
+  $('wcssLabel').textContent = isMap ? 'WCSS (סכום ריבועי מרחק, ק״מ²)' : 'WCSS (סכום ריבועי מרחק)';
   $('statsSumHeader').textContent = isMap ? 'סכום מרחק (ק״מ)' : 'סכום מרחק';
   $('totalSumLabel').textContent = isMap ? 'סה״כ סכום מרחקים (ק״מ)' : 'סה״כ סכום מרחקים';
 }
@@ -708,9 +708,17 @@ function updateCentroids(){
 
 function computeStats(){
   const sums = state.centroids.map(()=>({sum:0,n:0}));
-  state.points.forEach(p=>{ if(p.cluster>=0){ sums[p.cluster].sum += displayDist(p, state.centroids[p.cluster]); sums[p.cluster].n++; } });
+  let wcss = 0;
+  state.points.forEach(p=>{
+    if(p.cluster>=0){
+      const d = displayDist(p, state.centroids[p.cluster]);
+      sums[p.cluster].sum += d;
+      sums[p.cluster].n++;
+      wcss += d*d; // WCSS is the sum of *squared* distances to the centroid, not plain distance
+    }
+  });
   const total = sums.reduce((a,s)=>a+s.sum,0);
-  return {sums, total};
+  return {sums, total, wcss};
 }
 
 function stepOnce(){
@@ -720,7 +728,7 @@ function stepOnce(){
   assign();
   state.iteration++;
   const stats = computeStats();
-  state.wcssHistory.push(stats.total);
+  state.wcssHistory.push(stats.wcss);
   if(state.wcssHistory.length>60) state.wcssHistory.shift();
   state.converged = !changed;
   render();
@@ -732,7 +740,7 @@ function resetModel(freshInit){
   state.iteration = 0; state.wcssHistory = []; state.converged=false;
   assign();
   const stats = computeStats();
-  state.wcssHistory.push(stats.total);
+  state.wcssHistory.push(stats.wcss);
   render();
   setStatus('');
 }
@@ -954,7 +962,7 @@ function renderStatsTable(){
     body.appendChild(tr);
   });
   $('totalSum').textContent = stats.total.toFixed(2);
-  $('wcssReadout').textContent = stats.total.toFixed(1);
+  $('wcssReadout').textContent = stats.wcss.toFixed(1);
   $('iterReadout').textContent = state.iteration;
 }
 

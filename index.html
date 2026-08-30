@@ -293,7 +293,6 @@
           <button id="kPlus">+</button>
         </div>
       </label>
-      <button class="btn-full" id="btnReinit">אתחול צנטרואידים מחדש</button>
       <div class="hint">גרירת צנטרואיד באופן ידני מפעילה שיוך מחדש של הנקודות, ללא הזזה אוטומטית של המרכז.</div>
     </div>
 
@@ -303,10 +302,8 @@
         <button class="primary" id="btnPlay">▶ הפעל</button>
         <button id="btnStep">צעד בודד ⏭</button>
       </div>
-      <label class="field" id="ctrlSpeedControl">
-        <span class="lbl">מהירות אנימציה: <span id="speedLabel">600ms</span></span>
-        <input type="range" id="speedRange" min="80" max="1600" step="20" value="600">
-      </label>
+      <button class="btn-full" id="btnReinit" style="margin-bottom:10px;">🎲 אתחול אקראי לצנטרואידים</button>
+      <div class="hint">כל צעד באנימציה נמשך 2 שניות ומשאיר עקבה של תנועת הצנטרואידים על המפה/הגרף.</div>
       <div class="status-line" id="statusLine"></div>
     </div>
 
@@ -397,7 +394,6 @@
         <label class="tm-check"><input type="checkbox" data-vis="kControl"> שליטה ב-K</label>
         <label class="tm-check"><input type="checkbox" data-vis="reinitButton"> כפתור אתחול צנטרואידים</label>
         <label class="tm-check"><input type="checkbox" data-vis="runButtons"> הפעלה / צעד בודד</label>
-        <label class="tm-check"><input type="checkbox" data-vis="speedControl"> מהירות אנימציה</label>
         <label class="tm-check"><input type="checkbox" data-vis="linesToggle"> קווי מרחק לצנטרואיד</label>
         <label class="tm-check"><input type="checkbox" data-vis="minmaxToggle"> נרמול Min-Max</label>
         <label class="tm-check"><input type="checkbox" data-vis="silhouetteToggle"> ניתוח סילואט</label>
@@ -469,12 +465,12 @@ const PALETTE = ['#3b82f6','#e8a33d','#d16bd1','#f5c518','#5b8def','#f26d6d','#d
 const state = {
   headers: [], rows: [], numericCols: [], latCol:null, lonCol:null,
   xCol:null, yCol:null, vizMode:'scatter', geoAvailable:false,
-  points: [], k:3, centroids: [], running:false, timer:null, speed:600,
+  points: [], k:3, centroids: [], centroidTrails: [], running:false, timer:null, speed:2000,
   showLines:false, showSilhouette:false, minmax:false,
   domain:{xmin:0,xmax:1,ymin:0,ymax:1},
   origDomain:{xmin:0,xmax:1,ymin:0,ymax:1},
   iteration:0, wcssHistory:[], converged:false,
-  map:null, mapMarkers:[], mapCentroidMarkers:[], mapLines:[],
+  map:null, mapMarkers:[], mapCentroidMarkers:[], mapLines:[], mapCentroidTrails:[],
   dragging:null
 };
 
@@ -605,6 +601,13 @@ function applyMinMaxTransform(on){
     if(on){ c.x = (c.x - d.xmin)/(d.xmax-d.xmin); c.y = (c.y - d.ymin)/(d.ymax-d.ymin); }
     else { c.x = c.x*(d.xmax-d.xmin)+d.xmin; c.y = c.y*(d.ymax-d.ymin)+d.ymin; }
   });
+  // ...and the recorded centroid movement trail, so it stays visually consistent
+  state.centroidTrails.forEach(trail=>{
+    trail.forEach(pt=>{
+      if(on){ pt.x = (pt.x - d.xmin)/(d.xmax-d.xmin); pt.y = (pt.y - d.ymin)/(d.ymax-d.ymin); }
+      else { pt.x = pt.x*(d.xmax-d.xmin)+d.xmin; pt.y = pt.y*(d.ymax-d.ymin)+d.ymin; }
+    });
+  });
   computeDomain();
 }
 
@@ -622,6 +625,12 @@ function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 function fmtNum(v){ return (v==null || isNaN(v)) ? '–' : String(Math.round(v*10000)/10000); }
+
+// Thousands-separated formatting for the larger distance/WCSS figures, so
+// e.g. 44961.1 reads as "44,961.1" instead of a long run of digits.
+function fmtCommaNum(v, decimals){
+  return v.toLocaleString('en-US', {minimumFractionDigits:decimals, maximumFractionDigits:decimals});
+}
 
 // Centroid coordinates are stored min-max-normalized while state.minmax is on;
 // this reverses that so the info box always shows real-world units, matching
@@ -679,11 +688,13 @@ function displayDist(a,b){
 }
 
 function initCentroids(){
-  if(state.points.length===0){ state.centroids=[]; return; }
+  if(state.points.length===0){ state.centroids=[]; state.centroidTrails=[]; return; }
   const shuffled = [...state.points].sort(()=>Math.random()-0.5);
   const chosen = [];
   for(let i=0;i<state.k;i++){ const p = shuffled[i % shuffled.length]; chosen.push({x:p.x, y:p.y}); }
   state.centroids = chosen;
+  // trail starts fresh at the random initial position of each centroid
+  state.centroidTrails = chosen.map(c=>[{x:c.x, y:c.y}]);
 }
 
 function assign(){
@@ -725,6 +736,10 @@ function stepOnce(){
   if(state.points.length===0 || state.centroids.length===0) return;
   const changed = assign();
   updateCentroids();
+  state.centroids.forEach((c,i)=>{
+    if(!state.centroidTrails[i]) state.centroidTrails[i] = [{x:c.x, y:c.y}];
+    state.centroidTrails[i].push({x:c.x, y:c.y});
+  });
   assign();
   state.iteration++;
   const stats = computeStats();
@@ -808,6 +823,24 @@ function renderSVG(){
       svg.appendChild(line);
     });
   }
+  // centroid movement trail: where each centroid has been across iterations
+  state.centroidTrails.forEach((trail,ci)=>{
+    if(trail.length<2) return;
+    const points = trail.map(pt=>`${sx(pt.x)},${sy(pt.y)}`).join(' ');
+    const poly = document.createElementNS(SVG_NS,'polyline');
+    poly.setAttribute('points', points);
+    poly.setAttribute('fill','none');
+    poly.setAttribute('stroke', PALETTE[ci % PALETTE.length]);
+    poly.setAttribute('stroke-width','1.6'); poly.setAttribute('stroke-opacity','0.55');
+    poly.setAttribute('stroke-dasharray','4,3');
+    svg.appendChild(poly);
+    trail.slice(0,-1).forEach(pt=>{
+      const dot = document.createElementNS(SVG_NS,'circle');
+      dot.setAttribute('cx', sx(pt.x)); dot.setAttribute('cy', sy(pt.y)); dot.setAttribute('r','2.6');
+      dot.setAttribute('fill', PALETTE[ci % PALETTE.length]); dot.setAttribute('fill-opacity','0.55');
+      svg.appendChild(dot);
+    });
+  });
   state.points.forEach(p=>{
     const c = document.createElementNS(SVG_NS,'circle');
     c.setAttribute('cx', sx(p.x)); c.setAttribute('cy', sy(p.y)); c.setAttribute('r','4.2');
@@ -885,6 +918,19 @@ function renderMap(){
   state.mapMarkers.forEach(m=>state.map.removeLayer(m)); state.mapMarkers=[];
   state.mapCentroidMarkers.forEach(m=>state.map.removeLayer(m)); state.mapCentroidMarkers=[];
   state.mapLines.forEach(m=>state.map.removeLayer(m)); state.mapLines=[];
+  state.mapCentroidTrails.forEach(m=>state.map.removeLayer(m)); state.mapCentroidTrails=[];
+
+  // centroid movement trail: where each centroid has been across iterations
+  state.centroidTrails.forEach((trail,ci)=>{
+    if(trail.length<2) return;
+    const latlngs = trail.map(pt=>[pt.y, pt.x]);
+    const line = L.polyline(latlngs, {color: PALETTE[ci % PALETTE.length], weight:2, opacity:0.55, dashArray:'5,5'}).addTo(state.map);
+    state.mapCentroidTrails.push(line);
+    trail.slice(0,-1).forEach(pt=>{
+      const dot = L.circleMarker([pt.y, pt.x], {radius:3, color: PALETTE[ci % PALETTE.length], fillColor: PALETTE[ci % PALETTE.length], fillOpacity:0.6, opacity:0.6, weight:1, interactive:false}).addTo(state.map);
+      state.mapCentroidTrails.push(dot);
+    });
+  });
 
   const bounds = [];
   state.points.forEach(p=>{
@@ -958,11 +1004,11 @@ function renderStatsTable(){
     const tr = document.createElement('tr');
     const avg = s.n>0 ? (s.sum/s.n) : 0;
     tr.innerHTML = `<td><span class="swatch cluster-color" style="background:${PALETTE[ci%PALETTE.length]}"></span> ${ci+1}</td>
-      <td>${s.n}</td><td>${s.sum.toFixed(2)}</td><td>${avg.toFixed(2)}</td>`;
+      <td>${s.n}</td><td>${fmtCommaNum(s.sum,2)}</td><td>${fmtCommaNum(avg,2)}</td>`;
     body.appendChild(tr);
   });
-  $('totalSum').textContent = stats.total.toFixed(2);
-  $('wcssReadout').textContent = stats.wcss.toFixed(1);
+  $('totalSum').textContent = fmtCommaNum(stats.total,2);
+  $('wcssReadout').textContent = fmtCommaNum(stats.wcss,1);
   $('iterReadout').textContent = state.iteration;
 }
 
@@ -1230,7 +1276,7 @@ async function applyScenario(id){
 const teacherConfig = {
   visible: {
     scenarioPanel:true, fileUpload:true, columnSelectors:true,
-    kControl:true, reinitButton:true, runButtons:true, speedControl:true,
+    kControl:true, reinitButton:true, runButtons:true,
     linesToggle:true, minmaxToggle:true, silhouetteToggle:true, statsSection:true,
     aboutPanel:true, resetButton:true
   },
@@ -1368,7 +1414,7 @@ function updateGhTokenStatus(){
 const VIS_TARGETS = {
   scenarioPanel:'panelScenario', fileUpload:'ctrlFileUpload',
   kControl:'ctrlKControl', reinitButton:'btnReinit', runButtons:'ctrlRunButtons',
-  speedControl:'ctrlSpeedControl', linesToggle:'btnLines', minmaxToggle:'btnMinMax',
+  linesToggle:'btnLines', minmaxToggle:'btnMinMax',
   silhouetteToggle:'btnSilhouette', statsSection:['panelStats','ctrlTelemetry'],
   aboutPanel:'panelAbout', resetButton:'btnReset'
 };
@@ -1729,7 +1775,6 @@ $('btnReinit').addEventListener('click', ()=>{ resetModel(true); setStatus('צנ
 
 $('btnPlay').addEventListener('click', ()=>toggleRun());
 $('btnStep').addEventListener('click', ()=>{ toggleRun(false); stepOnce(); });
-$('speedRange').addEventListener('input', e=>{ state.speed = +e.target.value; $('speedLabel').textContent = state.speed+'ms'; if(state.running) toggleRun(true); });
 
 function setShowLines(on){
   state.showLines = on;
@@ -1770,10 +1815,10 @@ function resetAll(){
   if(state.map){ state.map.remove(); state.map = null; }
   state.headers=[]; state.rows=[]; state.numericCols=[]; state.latCol=null; state.lonCol=null;
   state.xCol=null; state.yCol=null; state.vizMode='scatter'; state.geoAvailable=false;
-  state.points=[]; state.k=3; state.centroids=[]; state.speed=600;
+  state.points=[]; state.k=3; state.centroids=[]; state.centroidTrails=[]; state.speed=2000;
   state.showLines=false; state.showSilhouette=false; state.minmax=false;
   state.iteration=0; state.wcssHistory=[]; state.converged=false; state.dragging=null;
-  state.mapMarkers=[]; state.mapCentroidMarkers=[]; state.mapLines=[]; state._mapFitted=false;
+  state.mapMarkers=[]; state.mapCentroidMarkers=[]; state.mapLines=[]; state.mapCentroidTrails=[]; state._mapFitted=false;
 
   $('fileInput').value = '';
   $('scenarioSelect').value = 'free';
@@ -1781,7 +1826,6 @@ function resetAll(){
   $('btnScenarioRandom').style.display = 'none';
   $('colSelectors').style.display = 'none';
   $('kValue').textContent = state.k;
-  $('speedRange').value = state.speed; $('speedLabel').textContent = state.speed+'ms';
   $('btnLines').classList.remove('on');
   $('btnMinMax').classList.remove('on'); $('btnMinMax').disabled = false;
   $('btnSilhouette').classList.remove('on');

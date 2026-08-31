@@ -162,6 +162,13 @@
   .empty-state .big{ font-size:38px; }
   .centroid-handle{ cursor:grab; }
   .centroid-handle:active{ cursor:grabbing; }
+  @keyframes centroidPop{
+    0%{ transform:scale(0.2); opacity:0; }
+    55%{ transform:scale(1.3); opacity:1; }
+    100%{ transform:scale(1); opacity:1; }
+  }
+  .centroid-pop{ animation:centroidPop 0.4s cubic-bezier(.34,1.56,.64,1); transform-box:fill-box; transform-origin:center; }
+  .centroid-pop-icon{ animation:centroidPop 0.4s cubic-bezier(.34,1.56,.64,1); transform-origin:center; }
 
   /* ===== Right sidebar stats ===== */
   table.stats{ width:100%; border-collapse:collapse; font-family:var(--mono); font-size:12px; }
@@ -297,13 +304,13 @@
     </div>
 
     <div class="panel">
-      <h2>הרצת אנימציה</h2>
+      <h2>הדגמת האלגוריתם</h2>
       <div class="row" style="margin-bottom:10px;" id="ctrlRunButtons">
-        <button class="primary" id="btnPlay">▶ הפעל</button>
-        <button id="btnStep">צעד בודד ⏭</button>
+        <button class="primary" id="btnPlay" style="flex:1;">▶ הפעל הדגמה</button>
+        <button id="btnMuteSound" title="השתקת צלילים" style="flex:0 0 auto;">🔊</button>
       </div>
       <button class="btn-full" id="btnReinit" style="margin-bottom:10px;">🎲 אתחול אקראי לצנטרואידים</button>
-      <div class="hint">כל צעד באנימציה נמשך 2 שניות ומשאיר עקבה של תנועת הצנטרואידים על המפה/הגרף.</div>
+      <div class="hint">ההדגמה עוברת שלב-שלב על האלגוריתם: הופעת צנטרואידים, שיוך כל נקודה לצנטרואיד הקרוב, עדכון המיקום הממוצע וחזרה עד להתכנסות.</div>
       <div class="status-line" id="statusLine"></div>
     </div>
 
@@ -393,7 +400,7 @@
         <label class="tm-check"><input type="checkbox" data-vis="columnSelectors"> בחירת עמודות / מצב תצוגה</label>
         <label class="tm-check"><input type="checkbox" data-vis="kControl"> שליטה ב-K</label>
         <label class="tm-check"><input type="checkbox" data-vis="reinitButton"> כפתור אתחול צנטרואידים</label>
-        <label class="tm-check"><input type="checkbox" data-vis="runButtons"> הפעלה / צעד בודד</label>
+        <label class="tm-check"><input type="checkbox" data-vis="runButtons"> הפעלת ההדגמה</label>
         <label class="tm-check"><input type="checkbox" data-vis="linesToggle"> קווי מרחק לצנטרואיד</label>
         <label class="tm-check"><input type="checkbox" data-vis="minmaxToggle"> נרמול Min-Max</label>
         <label class="tm-check"><input type="checkbox" data-vis="silhouetteToggle"> ניתוח סילואט</label>
@@ -465,13 +472,16 @@ const PALETTE = ['#3b82f6','#e8a33d','#d16bd1','#f5c518','#5b8def','#f26d6d','#d
 const state = {
   headers: [], rows: [], numericCols: [], latCol:null, lonCol:null,
   xCol:null, yCol:null, vizMode:'scatter', geoAvailable:false,
-  points: [], k:3, centroids: [], centroidTrails: [], running:false, timer:null, speed:2000,
+  points: [], k:3, centroids: [], centroidTrails: [],
   showLines:false, showSilhouette:false, minmax:false,
   domain:{xmin:0,xmax:1,ymin:0,ymax:1},
   origDomain:{xmin:0,xmax:1,ymin:0,ymax:1},
   iteration:0, wcssHistory:[], converged:false,
   map:null, mapMarkers:[], mapCentroidMarkers:[], mapLines:[], mapCentroidTrails:[],
-  dragging:null
+  dragging:null,
+  // Choreographed algorithm demonstration (replaces the old fixed-interval animation)
+  choreoGen:0, choreoRunning:false, centroidsIntroduced:false, initialAssignDone:false,
+  soundMuted:false, _popCentroidIdx:null
 };
 
 const $ = id => document.getElementById(id);
@@ -520,7 +530,7 @@ function loadDataset(headers, rows){
   state.yCol = nonGeoNumeric[1] || det.numeric[1] || det.numeric[0] || null;
   populateColumnUI();
   rebuildPoints();
-  resetModel(true);
+  resetModel();
   $('emptyState').style.display = 'none';
   $('dataHint').textContent = `נטענו ${rows.length} רשומות · ${det.numeric.length} עמודות מספריות` +
     (state.geoAvailable ? ' · זוהו קואורדינטות גיאוגרפיות' : '');
@@ -687,6 +697,56 @@ function displayDist(a,b){
   return dist(a,b);
 }
 
+function nearestCentroidIndex(p){
+  let best=-1, bd=Infinity;
+  state.centroids.forEach((c,ci)=>{ const d=dist(p,c); if(d<bd){bd=d; best=ci;} });
+  return best;
+}
+
+// ---------------- Sound effects (Web Audio, no external assets) ----------------
+let audioCtx = null;
+function playTone(freq, duration, type){
+  if(state.soundMuted) return;
+  try{
+    if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.value = freq;
+    const t0 = audioCtx.currentTime;
+    gain.gain.setValueAtTime(0, t0);
+    gain.gain.linearRampToValueAtTime(0.16, t0+0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0008, t0+duration);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(t0); osc.stop(t0+duration+0.02);
+  }catch(e){ /* Web Audio unavailable -- demonstration still works silently */ }
+}
+function playCentroidAppearSound(ci){ playTone(440 + ci*70, 0.22, 'sine'); }
+function playConvergedSound(){
+  playTone(523.25, 0.16, 'sine');
+  setTimeout(()=>playTone(659.25, 0.16, 'sine'), 130);
+  setTimeout(()=>playTone(783.99, 0.28, 'sine'), 260);
+}
+
+// ---------------- Choreographed demonstration engine ----------------
+// Replaces the old fixed-interval "play" loop with a scripted, narrated
+// walkthrough of the algorithm itself: centroids appear one at a time, the
+// first assignment is revealed point-by-point (candidate lines to every
+// centroid, closest one wins), then centroids glide to the new mean and only
+// the points that actually change cluster get highlighted each round after
+// that, looping until nothing changes.
+function sleep(ms){ return new Promise(res=>setTimeout(res, ms)); }
+function choreoCancelled(myGen){ return myGen !== state.choreoGen; }
+
+// Pacing scales down per-point as the dataset grows, so a 200-point dataset's
+// one-time initial-assignment reveal doesn't take minutes.
+function pointStepTimings(n){
+  const showMs = Math.max(60, Math.min(200, Math.round(6000/Math.max(n,1))));
+  const blinkMs = Math.max(45, Math.min(120, Math.round(3600/Math.max(n,1))));
+  const settleMs = Math.max(25, Math.min(90, Math.round(2400/Math.max(n,1))));
+  return {showMs, blinkMs, settleMs};
+}
+
 function initCentroids(){
   if(state.points.length===0){ state.centroids=[]; state.centroidTrails=[]; return; }
   const shuffled = [...state.points].sort(()=>Math.random()-0.5);
@@ -732,45 +792,17 @@ function computeStats(){
   return {sums, total, wcss};
 }
 
-function stepOnce(){
-  if(state.points.length===0 || state.centroids.length===0) return;
-  const changed = assign();
-  updateCentroids();
-  state.centroids.forEach((c,i)=>{
-    if(!state.centroidTrails[i]) state.centroidTrails[i] = [{x:c.x, y:c.y}];
-    state.centroidTrails[i].push({x:c.x, y:c.y});
-  });
-  assign();
-  state.iteration++;
-  const stats = computeStats();
-  state.wcssHistory.push(stats.wcss);
-  if(state.wcssHistory.length>60) state.wcssHistory.shift();
-  state.converged = !changed;
+// Resets to a "ready to demonstrate" state: only data points, no centroids
+// yet -- matches the demonstration's own step 1 (centroids appear on Play).
+function resetModel(){
+  stopChoreography();
+  state.centroids = [];
+  state.centroidTrails = [];
+  state.points.forEach(p=>{ p.cluster = -1; });
+  state.iteration = 0; state.wcssHistory = []; state.converged = false;
+  state.centroidsIntroduced = false; state.initialAssignDone = false;
   render();
-  if(state.converged && state.running){ toggleRun(false); setStatus(`התכנסות הושגה באיטרציה ${state.iteration} ✓`); }
-}
-
-function resetModel(freshInit){
-  if(freshInit){ initCentroids(); }
-  state.iteration = 0; state.wcssHistory = []; state.converged=false;
-  assign();
-  const stats = computeStats();
-  state.wcssHistory.push(stats.wcss);
-  render();
-  setStatus('');
-}
-
-function toggleRun(force){
-  state.running = (force!==undefined) ? force : !state.running;
-  $('btnPlay').textContent = state.running ? '⏸ השהה' : '▶ הפעל';
-  $('btnPlay').classList.toggle('primary', !state.running);
-  if(state.running){
-    clearInterval(state.timer);
-    state.timer = setInterval(()=>{ if(!state.converged) stepOnce(); }, state.speed);
-    setStatus('אנימציה פועלת…');
-  } else {
-    clearInterval(state.timer);
-  }
+  setStatus('לחצו "▶ הפעל הדגמה" כדי לצפות בהדגמת אלגוריתם K-Means שלב-שלב.');
 }
 
 function setStatus(t){ $('statusLine').textContent = t; }
@@ -852,7 +884,7 @@ function renderSVG(){
   });
   state.centroids.forEach((c,ci)=>{
     const g = document.createElementNS(SVG_NS,'g');
-    g.setAttribute('class','centroid-handle'); g.dataset.ci = ci;
+    g.setAttribute('class', 'centroid-handle' + (ci===state._popCentroidIdx ? ' centroid-pop' : '')); g.dataset.ci = ci;
     const halo = document.createElementNS(SVG_NS,'circle');
     halo.setAttribute('cx', sx(c.x)); halo.setAttribute('cy', sy(c.y)); halo.setAttribute('r','13');
     halo.setAttribute('fill', PALETTE[ci % PALETTE.length]); halo.setAttribute('fill-opacity','0.18');
@@ -876,7 +908,7 @@ function attachDrag(el, ci){
   el.addEventListener('pointerdown', ev=>{
     ev.preventDefault();
     state.dragging = ci;
-    toggleRun(false);
+    stopChoreography();
     el.setPointerCapture(ev.pointerId);
   });
   el.addEventListener('pointermove', ev=>{
@@ -905,10 +937,13 @@ function ensureMap(){
   }).addTo(state.map);
 }
 
-function coloredIcon(color, big){
+function coloredIcon(color, big, pop){
+  // The pop animation is applied to our own inner div, not the className on
+  // the outer wrapper -- Leaflet positions markers via a transform on that
+  // outer element, and a CSS transform animation there would fight it.
   return L.divIcon({
     className:'',
-    html:`<div style="width:${big?22:11}px;height:${big?22:11}px;border-radius:50%;background:${color};border:${big?'3px solid #fff':'1.5px solid #0d1016'};box-shadow:0 0 4px rgba(0,0,0,.5);"></div>`,
+    html:`<div class="${pop?'centroid-pop-icon':''}" style="width:${big?22:11}px;height:${big?22:11}px;border-radius:50%;background:${color};border:${big?'3px solid #fff':'1.5px solid #0d1016'};box-shadow:0 0 4px rgba(0,0,0,.5);"></div>`,
     iconSize:[big?22:11, big?22:11], iconAnchor:[big?11:5.5, big?11:5.5]
   });
 }
@@ -950,8 +985,8 @@ function renderMap(){
     });
   }
   state.centroids.forEach((c,ci)=>{
-    const m = L.marker([c.y, c.x], {icon: coloredIcon(PALETTE[ci % PALETTE.length], true), draggable:true}).addTo(state.map);
-    m.on('dragstart', ()=>{ toggleRun(false); });
+    const m = L.marker([c.y, c.x], {icon: coloredIcon(PALETTE[ci % PALETTE.length], true, ci===state._popCentroidIdx), draggable:true}).addTo(state.map);
+    m.on('dragstart', ()=>{ stopChoreography(); });
     m.on('drag', e=>{ const ll = e.target.getLatLng(); c.x = ll.lng; c.y = ll.lat; assign(); updateMapDynamic(); });
     m.on('dragend', ()=>{ setStatus('צנטרואיד הוזז ידנית — הנקודות שויכו מחדש.'); render(); });
     state.mapCentroidMarkers.push(m);
@@ -983,6 +1018,323 @@ function updateMapDynamic(){
     });
   }
   renderStatsOnly();
+}
+
+// ---------------- Choreographed demonstration: phase implementations ----------------
+function isMapMode(){ return state.vizMode==='map' && state.geoAvailable; }
+
+// Draws a single point-to-centroid line, independent of the "always show
+// lines" toggle -- used as a brief flourish so a resolved connection reads
+// clearly even when that toggle is off.
+function drawFlourishLine(p, c, color){
+  if(isMapMode()){
+    const line = L.polyline([[p.y,p.x],[c.y,c.x]], {color, weight:2.4, opacity:0.85}).addTo(state.map);
+    return { remove(){ state.map.removeLayer(line); } };
+  }
+  const svg = $('svgStage');
+  const line = document.createElementNS(SVG_NS,'line');
+  line.setAttribute('x1', sx(p.x)); line.setAttribute('y1', sy(p.y));
+  line.setAttribute('x2', sx(c.x)); line.setAttribute('y2', sy(c.y));
+  line.setAttribute('stroke', color); line.setAttribute('stroke-width','2'); line.setAttribute('stroke-opacity','0.85');
+  svg.appendChild(line);
+  return { remove(){ line.remove(); } };
+}
+
+// Step 1: centroids appear one at a time, each with a pop animation + tone.
+async function playCentroidsAppear(myGen){
+  initCentroids();
+  const finalCentroids = state.centroids;
+  const finalTrails = state.centroidTrails;
+  state.centroids = [];
+  state.centroidTrails = [];
+  render(true);
+  for(let i=0;i<finalCentroids.length;i++){
+    if(choreoCancelled(myGen)) return;
+    state.centroids.push(finalCentroids[i]);
+    state.centroidTrails.push(finalTrails[i]);
+    state._popCentroidIdx = i;
+    render(true);
+    playCentroidAppearSound(i);
+    await sleep(360);
+  }
+  state._popCentroidIdx = null;
+}
+
+// Step 2 (SVG): one point connects to every centroid, the closest blinks and
+// wins, the rest fade away.
+async function revealPointAssignmentSVG(p, bestCi, timings, myGen){
+  const svg = $('svgStage');
+  const overlay = document.createElementNS(SVG_NS,'g');
+  const lines = state.centroids.map((c,i)=>{
+    const line = document.createElementNS(SVG_NS,'line');
+    line.setAttribute('x1', sx(p.x)); line.setAttribute('y1', sy(p.y));
+    line.setAttribute('x2', sx(c.x)); line.setAttribute('y2', sy(c.y));
+    line.setAttribute('stroke', PALETTE[i % PALETTE.length]);
+    line.setAttribute('stroke-width', i===bestCi ? '2.4' : '1.3');
+    line.setAttribute('stroke-opacity', i===bestCi ? '0.95' : '0.35');
+    line.setAttribute('stroke-dasharray', '4,3');
+    overlay.appendChild(line);
+    return line;
+  });
+  const ring = document.createElementNS(SVG_NS,'circle');
+  ring.setAttribute('cx', sx(p.x)); ring.setAttribute('cy', sy(p.y)); ring.setAttribute('r','8');
+  ring.setAttribute('fill','none'); ring.setAttribute('stroke', PALETTE[bestCi % PALETTE.length]);
+  ring.setAttribute('stroke-width','2'); ring.setAttribute('stroke-opacity','0.9');
+  overlay.appendChild(ring);
+  svg.appendChild(overlay);
+
+  await sleep(timings.showMs);
+  if(choreoCancelled(myGen)){ overlay.remove(); return; }
+
+  lines.forEach((line,i)=>{ if(i!==bestCi) line.setAttribute('stroke-opacity','0'); });
+  for(let i=0;i<2;i++){
+    if(choreoCancelled(myGen)){ overlay.remove(); return; }
+    lines[bestCi].setAttribute('stroke-opacity','0.15'); ring.setAttribute('stroke-opacity','0.15');
+    await sleep(timings.blinkMs);
+    lines[bestCi].setAttribute('stroke-opacity','1'); ring.setAttribute('stroke-opacity','1');
+    await sleep(timings.blinkMs);
+  }
+  overlay.remove();
+}
+
+// Step 2 (map): same idea with Leaflet polylines / a circle marker ring.
+async function revealPointAssignmentMap(p, bestCi, timings, myGen){
+  const lines = state.centroids.map((c,i)=>L.polyline([[p.y,p.x],[c.y,c.x]], {
+    color: PALETTE[i % PALETTE.length],
+    weight: i===bestCi ? 3 : 1.6,
+    opacity: i===bestCi ? 0.95 : 0.35,
+    dashArray:'5,4'
+  }).addTo(state.map));
+  const ring = L.circleMarker([p.y,p.x], {radius:9, color: PALETTE[bestCi % PALETTE.length], weight:2, fill:false, opacity:0.9}).addTo(state.map);
+
+  await sleep(timings.showMs);
+  if(choreoCancelled(myGen)){ lines.forEach(l=>state.map.removeLayer(l)); state.map.removeLayer(ring); return; }
+
+  lines.forEach((line,i)=>{ if(i!==bestCi) state.map.removeLayer(line); });
+  const bestLine = lines[bestCi];
+  for(let i=0;i<2;i++){
+    if(choreoCancelled(myGen)){ state.map.removeLayer(bestLine); state.map.removeLayer(ring); return; }
+    bestLine.setStyle({opacity:0.15}); ring.setStyle({opacity:0.15});
+    await sleep(timings.blinkMs);
+    bestLine.setStyle({opacity:1}); ring.setStyle({opacity:1});
+    await sleep(timings.blinkMs);
+  }
+  state.map.removeLayer(bestLine);
+  state.map.removeLayer(ring);
+}
+
+async function playSequentialAssignment(myGen){
+  const timings = pointStepTimings(state.points.length);
+  state.points.forEach(p=>{ p.cluster = -1; });
+  render();
+  for(const p of state.points){
+    if(choreoCancelled(myGen)) return;
+    const bestCi = nearestCentroidIndex(p);
+    if(isMapMode()) await revealPointAssignmentMap(p, bestCi, timings, myGen);
+    else await revealPointAssignmentSVG(p, bestCi, timings, myGen);
+    if(choreoCancelled(myGen)) return;
+
+    p.cluster = bestCi;
+    render(true);
+    if(state.showLines){
+      await sleep(timings.settleMs);
+    }else{
+      const flourish = drawFlourishLine(p, state.centroids[bestCi], PALETTE[bestCi % PALETTE.length]);
+      await sleep(timings.settleMs + 120);
+      flourish.remove();
+    }
+  }
+}
+
+// Step 3: a target-cross marks each centroid's new mean position, then it glides there.
+function drawTargetCrossesSVG(targets){
+  const svg = $('svgStage');
+  const els = targets.map((t,ci)=>{
+    const color = PALETTE[ci % PALETTE.length];
+    const g = document.createElementNS(SVG_NS,'g');
+    const circle = document.createElementNS(SVG_NS,'circle');
+    circle.setAttribute('cx', sx(t.x)); circle.setAttribute('cy', sy(t.y)); circle.setAttribute('r','11');
+    circle.setAttribute('fill','none'); circle.setAttribute('stroke', color); circle.setAttribute('stroke-width','2'); circle.setAttribute('stroke-dasharray','3,3');
+    const l1 = document.createElementNS(SVG_NS,'line');
+    l1.setAttribute('x1', sx(t.x)-16); l1.setAttribute('y1', sy(t.y));
+    l1.setAttribute('x2', sx(t.x)+16); l1.setAttribute('y2', sy(t.y));
+    const l2 = document.createElementNS(SVG_NS,'line');
+    l2.setAttribute('x1', sx(t.x)); l2.setAttribute('y1', sy(t.y)-16);
+    l2.setAttribute('x2', sx(t.x)); l2.setAttribute('y2', sy(t.y)+16);
+    [l1,l2].forEach(l=>{ l.setAttribute('stroke', color); l.setAttribute('stroke-width','1.6'); l.setAttribute('stroke-opacity','0.8'); });
+    g.appendChild(circle); g.appendChild(l1); g.appendChild(l2);
+    svg.appendChild(g);
+    return g;
+  });
+  return () => els.forEach(el=>el.remove());
+}
+function drawTargetCrossesMap(targets){
+  const layers = targets.flatMap((t,ci)=>{
+    const color = PALETTE[ci % PALETTE.length];
+    const circle = L.circleMarker([t.y,t.x], {radius:11, color, weight:2, dashArray:'3,3', fill:false, opacity:0.85}).addTo(state.map);
+    const icon = L.divIcon({
+      className:'',
+      html:`<div style="width:32px;height:32px;position:relative;"><div style="position:absolute;top:15px;left:0;width:32px;height:2px;background:${color};opacity:.8;"></div><div style="position:absolute;left:15px;top:0;width:2px;height:32px;background:${color};opacity:.8;"></div></div>`,
+      iconSize:[32,32], iconAnchor:[16,16]
+    });
+    const cross = L.marker([t.y,t.x], {icon, interactive:false}).addTo(state.map);
+    return [circle, cross];
+  });
+  return () => layers.forEach(l=>state.map.removeLayer(l));
+}
+function drawTargetCrosses(targets){ return isMapMode() ? drawTargetCrossesMap(targets) : drawTargetCrossesSVG(targets); }
+
+async function playCentroidUpdateGlide(myGen){
+  const sums = state.centroids.map(()=>({x:0,y:0,n:0}));
+  state.points.forEach(p=>{ if(p.cluster>=0){ sums[p.cluster].x+=p.x; sums[p.cluster].y+=p.y; sums[p.cluster].n++; } });
+  const targets = state.centroids.map((c,i)=> sums[i].n>0 ? {x:sums[i].x/sums[i].n, y:sums[i].y/sums[i].n} : {x:c.x, y:c.y});
+
+  const removeCrosses = drawTargetCrosses(targets);
+  playTone(520, 0.14, 'triangle');
+  await sleep(550);
+  removeCrosses();
+  if(choreoCancelled(myGen)) return;
+
+  const start = state.centroids.map(c=>({x:c.x, y:c.y}));
+  const FRAMES = 22, DURATION = 650;
+  for(let f=1; f<=FRAMES; f++){
+    if(choreoCancelled(myGen)) return;
+    const t = f/FRAMES;
+    const eased = t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; // easeInOutQuad
+    state.centroids.forEach((c,i)=>{
+      c.x = start[i].x + (targets[i].x-start[i].x)*eased;
+      c.y = start[i].y + (targets[i].y-start[i].y)*eased;
+    });
+    render(true);
+    await sleep(DURATION/FRAMES);
+  }
+  state.centroids.forEach((c,i)=>{
+    c.x = targets[i].x; c.y = targets[i].y;
+    state.centroidTrails[i].push({x:c.x, y:c.y});
+  });
+  render(true);
+}
+
+// Step 4: only points whose nearest centroid actually changed get highlighted.
+function drawChangedHighlightsSVG(points){
+  const svg = $('svgStage');
+  const rings = points.map(p=>{
+    const ring = document.createElementNS(SVG_NS,'circle');
+    ring.setAttribute('cx', sx(p.x)); ring.setAttribute('cy', sy(p.y)); ring.setAttribute('r','9');
+    ring.setAttribute('fill','none'); ring.setAttribute('stroke','#fff'); ring.setAttribute('stroke-width','2.2');
+    svg.appendChild(ring);
+    return ring;
+  });
+  return {
+    setOpacity(v){ rings.forEach(r=>r.setAttribute('stroke-opacity', v)); },
+    remove(){ rings.forEach(r=>r.remove()); }
+  };
+}
+function drawChangedHighlightsMap(points){
+  const rings = points.map(p=>L.circleMarker([p.y,p.x], {radius:9, color:'#fff', weight:2.2, fill:false, opacity:1}).addTo(state.map));
+  return {
+    setOpacity(v){ rings.forEach(r=>r.setStyle({opacity:v})); },
+    remove(){ rings.forEach(r=>state.map.removeLayer(r)); }
+  };
+}
+function drawChangedHighlights(points){ return isMapMode() ? drawChangedHighlightsMap(points) : drawChangedHighlightsSVG(points); }
+
+async function playReassignChanged(myGen){
+  const changed = [];
+  state.points.forEach(p=>{
+    const bestCi = nearestCentroidIndex(p);
+    if(bestCi !== p.cluster) changed.push({p, to:bestCi});
+  });
+  if(changed.length===0) return changed;
+
+  const handle = drawChangedHighlights(changed.map(c=>c.p));
+  playTone(700, 0.1, 'square');
+  for(let i=0;i<3;i++){
+    if(choreoCancelled(myGen)){ handle.remove(); return changed; }
+    handle.setOpacity(0.15);
+    await sleep(150);
+    if(choreoCancelled(myGen)){ handle.remove(); return changed; }
+    handle.setOpacity(1);
+    await sleep(150);
+  }
+  handle.remove();
+  if(choreoCancelled(myGen)) return changed;
+
+  changed.forEach(({p,to})=>{ p.cluster = to; });
+  render(true);
+  return changed;
+}
+
+function pushStatsSnapshot(){
+  const stats = computeStats();
+  state.wcssHistory.push(stats.wcss);
+  if(state.wcssHistory.length>60) state.wcssHistory.shift();
+}
+
+function updatePlayButtonUI(){
+  $('btnPlay').textContent = state.choreoRunning ? '⏸ עצור' : '▶ הפעל הדגמה';
+  $('btnPlay').classList.toggle('primary', !state.choreoRunning);
+}
+function finishChoreography(){
+  state.choreoRunning = false;
+  updatePlayButtonUI();
+}
+function stopChoreography(){
+  state.choreoGen++; // invalidates any in-flight awaits mid-phase, freezing the current visual
+  if(state.choreoRunning) finishChoreography();
+}
+
+// The main orchestrator: steps 1 -> 2 run once per fresh reset, then 3 <-> 4
+// alternate (update centroids, reassign only what changed) until nothing
+// changes anymore.
+async function runChoreography(){
+  if(state.points.length===0){ setStatus('טרם נטענו נתונים.'); return; }
+  if(state.centroidsIntroduced && state.initialAssignDone && state.converged){
+    setStatus('הסימולציה כבר הגיעה להתכנסות. לחצו "אתחול אקראי לצנטרואידים" כדי להתחיל הדגמה חדשה.');
+    return;
+  }
+  const myGen = ++state.choreoGen;
+  state.choreoRunning = true;
+  updatePlayButtonUI();
+
+  if(!state.centroidsIntroduced){
+    setStatus('שלב 1: הצנטרואידים מופיעים…');
+    await playCentroidsAppear(myGen);
+    if(choreoCancelled(myGen)) return finishChoreography();
+    state.centroidsIntroduced = true;
+    render();
+  }
+
+  if(!state.initialAssignDone){
+    setStatus('שלב 2: כל נקודה משויכת לצנטרואיד הקרוב אליה…');
+    await playSequentialAssignment(myGen);
+    if(choreoCancelled(myGen)) return finishChoreography();
+    state.initialAssignDone = true;
+    state.iteration = 0;
+    pushStatsSnapshot();
+    render();
+  }
+
+  while(!state.converged){
+    if(choreoCancelled(myGen)) return finishChoreography();
+    setStatus(`שלב 3: מחשבים את המיקום הממוצע החדש לכל צנטרואיד (איטרציה ${state.iteration+1})…`);
+    await playCentroidUpdateGlide(myGen);
+    if(choreoCancelled(myGen)) return finishChoreography();
+    state.iteration++;
+
+    setStatus('שלב 4: בודקים אילו נקודות קרובות כעת לצנטרואיד אחר…');
+    const changed = await playReassignChanged(myGen);
+    if(choreoCancelled(myGen)) return finishChoreography();
+    pushStatsSnapshot();
+    render();
+
+    if(changed.length===0){
+      state.converged = true;
+      setStatus(`התכנסות הושגה באיטרציה ${state.iteration} ✓`);
+      playConvergedSound();
+    }
+  }
+  finishChoreography();
 }
 
 // ---------------- Legend / stats / telemetry ----------------
@@ -1260,7 +1612,7 @@ async function applyScenario(id){
   await loadDatasetById(sc.dataset);
   state.k = sc.defaultK != null ? sc.defaultK : state.k;
   $('kValue').textContent = state.k;
-  resetModel(true);
+  resetModel();
   if(sc.defaultShowLines != null) setShowLines(!!sc.defaultShowLines);
   if(sc.defaultMinMax != null) setMinMax(!!sc.defaultMinMax);
   $('scenarioDesc').textContent = sc.description || '';
@@ -1763,18 +2115,25 @@ $('fileInput').addEventListener('change', e=>{
 });
 
 $('scenarioSelect').addEventListener('change', e=>applyScenario(e.target.value));
-$('btnScenarioRandom').addEventListener('click', ()=>{ resetModel(true); setStatus('אותחל מיקום אקראי חדש לצנטרואידים.'); });
+$('btnScenarioRandom').addEventListener('click', ()=>{ resetModel(); setStatus('המודל אופס — לחצו "▶ הפעל הדגמה" לאתחול אקראי חדש של הצנטרואידים.'); });
 
-$('vizModeSelect').addEventListener('change', e=>{ state.vizMode = e.target.value; populateColumnUI(); rebuildPoints(); resetModel(true); });
-$('xColSelect').addEventListener('change', e=>{ state.xCol = e.target.value; rebuildPoints(); resetModel(true); });
-$('yColSelect').addEventListener('change', e=>{ state.yCol = e.target.value; rebuildPoints(); resetModel(true); });
+$('vizModeSelect').addEventListener('change', e=>{ state.vizMode = e.target.value; populateColumnUI(); rebuildPoints(); resetModel(); });
+$('xColSelect').addEventListener('change', e=>{ state.xCol = e.target.value; rebuildPoints(); resetModel(); });
+$('yColSelect').addEventListener('change', e=>{ state.yCol = e.target.value; rebuildPoints(); resetModel(); });
 
-$('kMinus').addEventListener('click', ()=>{ state.k = Math.max(1, state.k-1); $('kValue').textContent = state.k; resetModel(true); });
-$('kPlus').addEventListener('click', ()=>{ state.k = Math.min(10, state.k+1); $('kValue').textContent = state.k; resetModel(true); });
-$('btnReinit').addEventListener('click', ()=>{ resetModel(true); setStatus('צנטרואידים אותחלו מחדש.'); });
+$('kMinus').addEventListener('click', ()=>{ state.k = Math.max(1, state.k-1); $('kValue').textContent = state.k; resetModel(); });
+$('kPlus').addEventListener('click', ()=>{ state.k = Math.min(10, state.k+1); $('kValue').textContent = state.k; resetModel(); });
+$('btnReinit').addEventListener('click', ()=>{ resetModel(); setStatus('המודל אופס — לחצו "▶ הפעל הדגמה" לאתחול אקראי חדש של הצנטרואידים.'); });
 
-$('btnPlay').addEventListener('click', ()=>toggleRun());
-$('btnStep').addEventListener('click', ()=>{ toggleRun(false); stepOnce(); });
+$('btnPlay').addEventListener('click', ()=>{
+  if(state.choreoRunning) stopChoreography();
+  else runChoreography();
+});
+$('btnMuteSound').addEventListener('click', ()=>{
+  state.soundMuted = !state.soundMuted;
+  $('btnMuteSound').textContent = state.soundMuted ? '🔇' : '🔊';
+  $('btnMuteSound').title = state.soundMuted ? 'הפעלת צלילים' : 'השתקת צלילים';
+});
 
 function setShowLines(on){
   state.showLines = on;
@@ -1784,6 +2143,7 @@ function setShowLines(on){
 function setMinMax(on){
   if($('btnMinMax').disabled) return;
   if(state.minmax === on) return;
+  stopChoreography();
   state.minmax = on;
   $('btnMinMax').classList.toggle('on', on);
   applyMinMaxTransform(on);
@@ -1810,14 +2170,15 @@ $('btnSilhouette').addEventListener('click', ()=>{
 });
 
 function resetAll(){
-  toggleRun(false);
+  stopChoreography();
   hidePointInfo();
   if(state.map){ state.map.remove(); state.map = null; }
   state.headers=[]; state.rows=[]; state.numericCols=[]; state.latCol=null; state.lonCol=null;
   state.xCol=null; state.yCol=null; state.vizMode='scatter'; state.geoAvailable=false;
-  state.points=[]; state.k=3; state.centroids=[]; state.centroidTrails=[]; state.speed=2000;
+  state.points=[]; state.k=3; state.centroids=[]; state.centroidTrails=[];
   state.showLines=false; state.showSilhouette=false; state.minmax=false;
   state.iteration=0; state.wcssHistory=[]; state.converged=false; state.dragging=null;
+  state.centroidsIntroduced=false; state.initialAssignDone=false;
   state.mapMarkers=[]; state.mapCentroidMarkers=[]; state.mapLines=[]; state.mapCentroidTrails=[]; state._mapFitted=false;
 
   $('fileInput').value = '';
@@ -1830,7 +2191,7 @@ function resetAll(){
   $('btnMinMax').classList.remove('on'); $('btnMinMax').disabled = false;
   $('btnSilhouette').classList.remove('on');
   $('silhouetteRow').style.display = 'none';
-  $('btnPlay').textContent = '▶ הפעל'; $('btnPlay').classList.add('primary');
+  $('btnPlay').textContent = '▶ הפעל הדגמה'; $('btnPlay').classList.add('primary');
   $('svgStage').innerHTML=''; $('svgStage').style.display='block'; $('mapStage').style.display='none';
   $('statsBody').innerHTML=''; $('totalSum').textContent='–';
   $('wcssReadout').textContent='–'; $('iterReadout').textContent='0';

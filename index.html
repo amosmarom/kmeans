@@ -805,6 +805,23 @@ function resetModel(){
   setStatus('לחצו "▶ הפעל הדגמה" כדי לצפות בהדגמת אלגוריתם K-Means שלב-שלב.');
 }
 
+// Random init button: reset, then place the K centroids immediately so they
+// can be dragged right away, with their distance lines already shown.
+function reinitCentroidsNow(){
+  resetModel();
+  initCentroids();
+  if(state.centroids.length===0) return;
+  // assign immediately so the point-to-centroid distance lines are visible
+  // before the first drag; Play then continues from step 3 (update centroids)
+  assign();
+  state.centroidsIntroduced = true;
+  state.initialAssignDone = true;
+  state.iteration = 0;
+  pushStatsSnapshot();
+  setShowLines(true);
+  setStatus('צנטרואידים אותחלו אקראית — אפשר לגרור אותם, או ללחוץ "▶ הפעל הדגמה" להמשך.');
+}
+
 function setStatus(t){ $('statusLine').textContent = t; }
 
 // ---------------- Silhouette ----------------
@@ -2115,7 +2132,7 @@ $('fileInput').addEventListener('change', e=>{
 });
 
 $('scenarioSelect').addEventListener('change', e=>applyScenario(e.target.value));
-$('btnScenarioRandom').addEventListener('click', ()=>{ resetModel(); setStatus('המודל אופס — לחצו "▶ הפעל הדגמה" לאתחול אקראי חדש של הצנטרואידים.'); });
+$('btnScenarioRandom').addEventListener('click', reinitCentroidsNow);
 
 $('vizModeSelect').addEventListener('change', e=>{ state.vizMode = e.target.value; populateColumnUI(); rebuildPoints(); resetModel(); });
 $('xColSelect').addEventListener('change', e=>{ state.xCol = e.target.value; rebuildPoints(); resetModel(); });
@@ -2123,7 +2140,7 @@ $('yColSelect').addEventListener('change', e=>{ state.yCol = e.target.value; reb
 
 $('kMinus').addEventListener('click', ()=>{ state.k = Math.max(1, state.k-1); $('kValue').textContent = state.k; resetModel(); });
 $('kPlus').addEventListener('click', ()=>{ state.k = Math.min(10, state.k+1); $('kValue').textContent = state.k; resetModel(); });
-$('btnReinit').addEventListener('click', ()=>{ resetModel(); setStatus('המודל אופס — לחצו "▶ הפעל הדגמה" לאתחול אקראי חדש של הצנטרואידים.'); });
+$('btnReinit').addEventListener('click', reinitCentroidsNow);
 
 $('btnPlay').addEventListener('click', ()=>{
   if(state.choreoRunning) stopChoreography();

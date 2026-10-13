@@ -203,6 +203,7 @@
   }
   .teacher-modal-head{ display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid var(--border); }
   .teacher-modal-head h2{ margin:0; font-size:15px; }
+  .app-version{ font-size:11px; color:var(--muted); margin-top:3px; }
   .teacher-modal-body{ display:grid; grid-template-columns:1fr 1fr; gap:20px; padding:18px; }
   @media (max-width:640px){ .teacher-modal-body{ grid-template-columns:1fr; } }
   .tm-col h3{ font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--amber); margin:0 0 10px 0; }
@@ -389,7 +390,11 @@
 <div class="teacher-modal-overlay" id="teacherModal" style="display:none;">
   <div class="teacher-modal">
     <div class="teacher-modal-head">
-      <h2>🎓 מצב הגדרות מורה</h2>
+      <div>
+        <h2>🎓 מצב הגדרות מורה</h2>
+        <!-- bump on every release: version + last-updated date/time -->
+        <div class="app-version" id="appVersion">v1.27 · עודכן לאחרונה: 13/10/2026 21:34</div>
+      </div>
       <button class="small" id="btnCloseTeacher">✕ סגור</button>
     </div>
     <div class="teacher-modal-body">

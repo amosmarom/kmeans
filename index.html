@@ -150,6 +150,21 @@
   }
   .point-info-close:hover{ color:var(--text); }
   #mapStage{ display:none; }
+  .grid-ctrl{
+    background:rgba(255,255,255,.92); color:#1f2d4d; border-radius:4px; padding:4px 7px;
+    font:12px 'Heebo', sans-serif; box-shadow:0 1px 5px rgba(0,0,0,.35); direction:rtl;
+  }
+  .grid-ctrl label{ display:flex; align-items:center; gap:4px; white-space:nowrap; }
+  .grid-ctrl select{
+    width:auto; font:inherit; padding:1px 3px; margin:0;
+    background:#fff; color:#1f2d4d; border:1px solid #b8c0cf; border-radius:3px;
+  }
+  .grid-label{
+    position:absolute; white-space:nowrap; font:600 10.5px var(--mono, monospace); color:#1f2d4d;
+    background:rgba(255,255,255,.75); padding:0 3px; border-radius:3px; pointer-events:none; direction:ltr;
+  }
+  .grid-label-x{ transform:translate(-50%, -20px); }
+  .grid-label-y{ transform:translate(calc(-100% - 4px), -50%); }
   #svgStage{ background:
       linear-gradient(var(--border) 1px, transparent 1px) 0 0/40px 40px,
       linear-gradient(90deg, var(--border) 1px, transparent 1px) 0 0/40px 40px;
@@ -274,7 +289,7 @@
         <label class="field" id="vizModeWrap" style="display:none;">
           <span class="lbl">מצב תצוגה</span>
           <select id="vizModeSelect">
-            <option value="map">מפת רקע (קואורדינטות)</option>
+            <option value="map">מפת רקע + רשת ק״מ</option>
             <option value="scatter">פיזור לפי מאפיינים</option>
           </select>
         </label>
@@ -393,7 +408,7 @@
       <div>
         <h2>🎓 מצב הגדרות מורה</h2>
         <!-- bump on every release: version + last-updated date/time -->
-        <div class="app-version" id="appVersion">v1.29 · עודכן לאחרונה: 19/10/2026 19:00</div>
+        <div class="app-version" id="appVersion">v1.30 · עודכן לאחרונה: 19/10/2026 20:23</div>
       </div>
       <button class="small" id="btnCloseTeacher">✕ סגור</button>
     </div>
@@ -475,8 +490,9 @@
 const PALETTE = ['#3b82f6','#e8a33d','#d16bd1','#f5c518','#5b8def','#f26d6d','#d17a45','#b98ce8','#5bc0de','#e85b8a'];
 
 const state = {
-  headers: [], rows: [], numericCols: [], latCol:null, lonCol:null,
+  headers: [], rows: [], numericCols: [], kmXCol:null, kmYCol:null, geoOrigin:null,
   xCol:null, yCol:null, vizMode:'scatter', geoAvailable:false,
+  gridStep:'auto', gridLayer:null,
   points: [], k:3, centroids: [], centroidTrails: [],
   showLines:false, showSilhouette:false, minmax:false,
   domain:{xmin:0,xmax:1,ymin:0,ymax:1},
@@ -518,27 +534,83 @@ function detectColumns(headers, rows){
     if(ok && count>0) numeric.push(h);
   });
   const findCol = (regexes) => headers.find(h => regexes.some(re=>re.test(h)));
-  const latCol = findCol([/^lat(itude)?$/i, /^y$/i, /קו.?רוחב/]);
-  const lonCol = findCol([/^lon(g|gitude)?$/i, /^lng$/i, /^x$/i, /קו.?אורך/]);
-  return { numeric, latCol: (numeric.includes(latCol)?latCol:null), lonCol: (numeric.includes(lonCol)?lonCol:null) };
+  const onlyNumeric = c => numeric.includes(c) ? c : null;
+  const latCol = findCol([/^lat(itude)?$/i, /קו.?רוחב/]);
+  const lonCol = findCol([/^lon(g|gitude)?$/i, /^lng$/i, /קו.?אורך/]);
+  const kmXCol = findCol([/^x_?km$/i]);
+  const kmYCol = findCol([/^y_?km$/i]);
+  return { numeric, latCol: onlyNumeric(latCol), lonCol: onlyNumeric(lonCol), kmXCol: onlyNumeric(kmXCol), kmYCol: onlyNumeric(kmYCol) };
 }
 
-function loadDataset(headers, rows){
-  const det = detectColumns(headers, rows);
+// ---------------- Flat km grid ----------------
+// Geo data lives on a flat grid: x_km east and y_km north of a 0 point,
+// ignoring the earth's curvature so every distance is plain Euclidean km.
+// The 0 point's lat/lon ("origin" in catalog.json) is used only to lay that
+// grid over the background map -- a fixed linear mapping, the same one the
+// data files were generated with.
+const KM_PER_DEG_LAT = 110.574;
+function kmPerDegLon(lat0){ return 111.320 * Math.cos(lat0*Math.PI/180); }
+function kmToLatLng(pt){
+  const o = state.geoOrigin;
+  return [o.lat + pt.y/KM_PER_DEG_LAT, o.lon + pt.x/kmPerDegLon(o.lat)];
+}
+function latLngToKm(ll){
+  const o = state.geoOrigin;
+  return { x:(ll.lng - o.lon)*kmPerDegLon(o.lat), y:(ll.lat - o.lat)*KM_PER_DEG_LAT };
+}
+
+// A CSV that still has raw lat/lon columns (e.g. one a teacher uploads) is
+// converted once on load: the origin goes at its south-west corner, rounded
+// down to 0.1°, so every x_km/y_km value is positive.
+function latLonToKmRows(headers, rows, latCol, lonCol){
+  const lats = rows.map(r=>parseFloat(r[latCol])).filter(v=>!isNaN(v));
+  const lons = rows.map(r=>parseFloat(r[lonCol])).filter(v=>!isNaN(v));
+  if(!lats.length || lats.some(v=>Math.abs(v)>90) || lons.some(v=>Math.abs(v)>180)) return null;
+  const origin = { lat: Math.floor(Math.min(...lats)*10)/10, lon: Math.floor(Math.min(...lons)*10)/10 };
+  const at = Math.min(headers.indexOf(latCol), headers.indexOf(lonCol));
+  const rest = headers.filter(h=>h!==latCol && h!==lonCol);
+  const newHeaders = [...rest.slice(0,at), 'x_km', 'y_km', ...rest.slice(at)];
+  const newRows = rows.map(r=>{
+    const lat = parseFloat(r[latCol]), lon = parseFloat(r[lonCol]);
+    const o = {};
+    newHeaders.forEach(h=>{ o[h] = r[h]; });
+    o.x_km = isNaN(lon) ? '' : ((lon-origin.lon)*kmPerDegLon(origin.lat)).toFixed(2);
+    o.y_km = isNaN(lat) ? '' : ((lat-origin.lat)*KM_PER_DEG_LAT).toFixed(2);
+    return o;
+  });
+  return { headers:newHeaders, rows:newRows, origin };
+}
+
+// origin: the {lat, lon} of the grid's 0 point, from the dataset's
+// catalog.json entry. Without one, km columns still cluster fine but are
+// shown on the plain scatter plot instead of the background map.
+function loadDataset(headers, rows, origin){
+  let det = detectColumns(headers, rows);
+  let converted = false;
+  if(!(det.kmXCol && det.kmYCol) && det.latCol && det.lonCol){
+    const conv = latLonToKmRows(headers, rows, det.latCol, det.lonCol);
+    if(conv){ ({headers, rows, origin} = conv); det = detectColumns(headers, rows); converted = true; }
+  }
+  const hasKm = !!(det.kmXCol && det.kmYCol);
   state.headers = headers; state.rows = rows; state.numericCols = det.numeric;
-  state.latCol = det.latCol; state.lonCol = det.lonCol;
-  state.geoAvailable = !!(det.latCol && det.lonCol);
+  state.kmXCol = det.kmXCol; state.kmYCol = det.kmYCol;
+  state.geoOrigin = (hasKm && origin) ? origin : null;
+  state.geoAvailable = !!state.geoOrigin;
   state.vizMode = state.geoAvailable ? 'map' : 'scatter';
   state._mapFitted = false; // force the map to re-center/zoom on the newly loaded data
-  const nonGeoNumeric = det.numeric.filter(c=>c!==det.latCol && c!==det.lonCol);
-  state.xCol = nonGeoNumeric[0] || det.numeric[0] || null;
-  state.yCol = nonGeoNumeric[1] || det.numeric[1] || det.numeric[0] || null;
+  if(hasKm && !state.geoAvailable){
+    state.xCol = det.kmXCol; state.yCol = det.kmYCol;
+  }else{
+    const nonGeoNumeric = det.numeric.filter(c=>c!==det.kmXCol && c!==det.kmYCol);
+    state.xCol = nonGeoNumeric[0] || det.numeric[0] || null;
+    state.yCol = nonGeoNumeric[1] || det.numeric[1] || det.numeric[0] || null;
+  }
   populateColumnUI();
   rebuildPoints();
   resetModel();
   $('emptyState').style.display = 'none';
   $('dataHint').textContent = `נטענו ${rows.length} רשומות · ${det.numeric.length} עמודות מספריות` +
-    (state.geoAvailable ? ' · זוהו קואורדינטות גיאוגרפיות' : '');
+    (converted ? ' · קואורדינטות lat/lon הומרו לרשת ק״מ' : hasKm ? ' · מיקום ברשת ק״מ' : '');
 }
 
 function populateColumnUI(){
@@ -564,14 +636,13 @@ function populateColumnUI(){
 
 function updateModeHint(){
   $('modeHint').textContent = state.vizMode==='map'
-    ? `אשכול במרחב הגיאוגרפי (${state.lonCol} / ${state.latCol})`
+    ? `אשכול על רשת ק״מ (${state.kmXCol} / ${state.kmYCol})`
     : (state.xCol ? `אשכול לפי: ${state.xCol} × ${state.yCol}` : '');
   updateDistanceUnitLabels();
 }
 
-// Distance totals switch to km once displayDist() starts computing real-world
-// distance (map mode); labels follow so the numbers aren't mistaken for the
-// raw lon/lat degree-distance shown in scatter mode.
+// Distance totals are km in map mode (points sit on the flat km grid); labels
+// follow so the numbers aren't mistaken for unitless feature distances.
 function updateDistanceUnitLabels(){
   const isMap = (state.vizMode==='map' && state.geoAvailable);
   $('wcssLabel').textContent = isMap ? 'WCSS (סכום ריבועי מרחק, ק״מ²)' : 'WCSS (סכום ריבועי מרחק)';
@@ -583,7 +654,7 @@ function updateDistanceUnitLabels(){
 function rebuildPoints(){
   hidePointInfo();
   let xCol, yCol, isMap = (state.vizMode==='map' && state.geoAvailable);
-  if(isMap){ xCol = state.lonCol; yCol = state.latCol; } else { xCol = state.xCol; yCol = state.yCol; }
+  if(isMap){ xCol = state.kmXCol; yCol = state.kmYCol; } else { xCol = state.xCol; yCol = state.yCol; }
   if(!xCol || !yCol){ state.points = []; return; }
   const pts = [];
   state.rows.forEach((r,i)=>{
@@ -658,8 +729,8 @@ function centroidOriginalCoords(c){
 
 function showPointInfo(p){
   const isMap = (state.vizMode==='map' && state.geoAvailable);
-  const xLabel = isMap ? (state.lonCol || 'X') : (state.xCol || 'X');
-  const yLabel = isMap ? (state.latCol || 'Y') : (state.yCol || 'Y');
+  const xLabel = isMap ? 'X (ק״מ)' : (state.xCol || 'X');
+  const yLabel = isMap ? 'Y (ק״מ)' : (state.yCol || 'Y');
   const labelCol = state.headers.find(h=>!state.numericCols.includes(h));
   const pointName = (labelCol && p.row[labelCol]) ? p.row[labelCol] : `נקודה #${p.id+1}`;
 
@@ -684,23 +755,6 @@ $('btnClosePointInfo').addEventListener('click', hidePointInfo);
 
 // ---------------- K-Means core ----------------
 function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
-
-// Distance for display totals (WCSS, per-cluster sums/averages): in map mode
-// a/b are lon/lat degrees, where 1° of longitude and 1° of latitude cover
-// very different real-world distances, so plain Euclidean degree-distance is
-// meaningless as "km". This converts to a local equirectangular km distance
-// instead. Clustering itself (assign/updateCentroids) intentionally keeps
-// using plain dist() in degree-space, so switching this doesn't change which
-// points get assigned to which cluster -- only how the totals are reported.
-function displayDist(a,b){
-  if(state.vizMode==='map' && state.geoAvailable){
-    const avgLatRad = (a.y+b.y)/2 * Math.PI/180;
-    const dxKm = (a.x-b.x) * 111.320 * Math.cos(avgLatRad);
-    const dyKm = (a.y-b.y) * 110.574;
-    return Math.hypot(dxKm, dyKm);
-  }
-  return dist(a,b);
-}
 
 function nearestCentroidIndex(p){
   let best=-1, bd=Infinity;
@@ -787,7 +841,7 @@ function computeStats(){
   let wcss = 0;
   state.points.forEach(p=>{
     if(p.cluster>=0){
-      const d = displayDist(p, state.centroids[p.cluster]);
+      const d = dist(p, state.centroids[p.cluster]);
       sums[p.cluster].sum += d;
       sums[p.cluster].n++;
       wcss += d*d; // WCSS is the sum of *squared* distances to the centroid, not plain distance
@@ -957,6 +1011,66 @@ function ensureMap(){
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution:'&copy; OpenStreetMap contributors', maxZoom:18
   }).addTo(state.map);
+  // the km grid sits above the tiles but below distance lines and markers
+  state.map.createPane('gridPane');
+  state.map.getPane('gridPane').style.zIndex = 350;
+  state.map.getPane('gridPane').style.pointerEvents = 'none';
+  state.gridLayer = L.layerGroup().addTo(state.map);
+  state.map.on('moveend', renderGrid);
+
+  const GridControl = L.Control.extend({
+    onAdd(){
+      const div = L.DomUtil.create('div', 'grid-ctrl');
+      div.innerHTML = `<label>רשת <select id="gridStepSelect">
+        <option value="off">כבויה</option><option value="auto">אוטו׳</option>
+        ${GRID_STEPS.map(s=>`<option value="${s}">${s}</option>`).join('')}
+      </select> ק״מ</label>`;
+      L.DomEvent.disableClickPropagation(div);
+      L.DomEvent.disableScrollPropagation(div);
+      const sel = div.querySelector('select');
+      sel.value = String(state.gridStep);
+      sel.addEventListener('change', ()=>{ state.gridStep = sel.value; renderGrid(); });
+      return div;
+    }
+  });
+  new GridControl({position:'topleft'}).addTo(state.map);
+}
+
+// ---------------- km grid overlay ----------------
+const GRID_STEPS = [1, 2, 5, 10, 20, 50, 100];
+// "auto" keeps roughly 10-20 lines across the visible map at any zoom level
+function autoGridStep(spanKm){ return GRID_STEPS.find(s=>spanKm/s <= 20) || GRID_STEPS[GRID_STEPS.length-1]; }
+
+function renderGrid(){
+  if(!state.map || !state.gridLayer) return;
+  state.gridLayer.clearLayers();
+  if(!isMapMode() || state.gridStep==='off') return;
+  const b = state.map.getBounds();
+  const sw = latLngToKm(b.getSouthWest()), ne = latLngToKm(b.getNorthEast());
+  const span = Math.max(ne.x-sw.x, ne.y-sw.y);
+  let step = state.gridStep==='auto' ? autoGridStep(span) : +state.gridStep;
+  // a small fixed step on a zoomed-out map would mean thousands of lines
+  if(span/step > 60) step = autoGridStep(span);
+  const lineStyle = i => ({
+    pane:'gridPane', interactive:false,
+    color: i===0 ? '#c0392b' : '#1f2d4d',
+    weight: i===0 ? 2 : (i%5===0 ? 1.4 : 0.8),
+    opacity: i===0 ? 0.8 : (i%5===0 ? 0.55 : 0.35)
+  });
+  const label = (ll, text, cls) => L.marker(ll, {
+    pane:'gridPane', interactive:false, keyboard:false,
+    icon: L.divIcon({className:'', html:`<div class="grid-label ${cls}">${text}</div>`, iconSize:[0,0]})
+  }).addTo(state.gridLayer);
+  for(let i=Math.ceil(sw.x/step); i*step<=ne.x; i++){
+    const x = i*step;
+    L.polyline([kmToLatLng({x, y:sw.y}), kmToLatLng({x, y:ne.y})], lineStyle(i)).addTo(state.gridLayer);
+    label(kmToLatLng({x, y:sw.y}), x, 'grid-label-x');
+  }
+  for(let j=Math.ceil(sw.y/step); j*step<=ne.y; j++){
+    const y = j*step;
+    L.polyline([kmToLatLng({x:sw.x, y}), kmToLatLng({x:ne.x, y})], lineStyle(j)).addTo(state.gridLayer);
+    label(kmToLatLng({x:ne.x, y}), y, 'grid-label-y');
+  }
 }
 
 function coloredIcon(color, big, pop){
@@ -980,11 +1094,11 @@ function renderMap(){
   // centroid movement trail: where each centroid has been across iterations
   state.centroidTrails.forEach((trail,ci)=>{
     if(trail.length<2) return;
-    const latlngs = trail.map(pt=>[pt.y, pt.x]);
+    const latlngs = trail.map(kmToLatLng);
     const line = L.polyline(latlngs, {color: PALETTE[ci % PALETTE.length], weight:2, opacity:0.55, dashArray:'5,5'}).addTo(state.map);
     state.mapCentroidTrails.push(line);
     trail.slice(0,-1).forEach(pt=>{
-      const dot = L.circleMarker([pt.y, pt.x], {radius:3, color: PALETTE[ci % PALETTE.length], fillColor: PALETTE[ci % PALETTE.length], fillOpacity:0.6, opacity:0.6, weight:1, interactive:false}).addTo(state.map);
+      const dot = L.circleMarker(kmToLatLng(pt), {radius:3, color: PALETTE[ci % PALETTE.length], fillColor: PALETTE[ci % PALETTE.length], fillOpacity:0.6, opacity:0.6, weight:1, interactive:false}).addTo(state.map);
       state.mapCentroidTrails.push(dot);
     });
   });
@@ -992,28 +1106,29 @@ function renderMap(){
   const bounds = [];
   state.points.forEach(p=>{
     const color = p.cluster>=0 ? PALETTE[p.cluster % PALETTE.length] : '#5a6478';
-    const m = L.marker([p.y, p.x], {icon: coloredIcon(color,false), interactive:true}).addTo(state.map);
+    const m = L.marker(kmToLatLng(p), {icon: coloredIcon(color,false), interactive:true}).addTo(state.map);
     m._colorCluster = p.cluster;
     m.on('click', ()=>showPointInfo(p));
     state.mapMarkers.push(m);
-    bounds.push([p.y,p.x]);
+    bounds.push(kmToLatLng(p));
   });
   if(state.showLines){
     state.points.forEach(p=>{
       if(p.cluster<0) return;
       const c = state.centroids[p.cluster];
-      const line = L.polyline([[p.y,p.x],[c.y,c.x]], {color: PALETTE[p.cluster % PALETTE.length], weight:2.4, opacity:0.65}).addTo(state.map);
+      const line = L.polyline([kmToLatLng(p),kmToLatLng(c)], {color: PALETTE[p.cluster % PALETTE.length], weight:2.4, opacity:0.65}).addTo(state.map);
       state.mapLines.push(line);
     });
   }
   state.centroids.forEach((c,ci)=>{
-    const m = L.marker([c.y, c.x], {icon: coloredIcon(PALETTE[ci % PALETTE.length], true, ci===state._popCentroidIdx), draggable:true}).addTo(state.map);
+    const m = L.marker(kmToLatLng(c), {icon: coloredIcon(PALETTE[ci % PALETTE.length], true, ci===state._popCentroidIdx), draggable:true}).addTo(state.map);
     m.on('dragstart', ()=>{ stopChoreography(); });
-    m.on('drag', e=>{ const ll = e.target.getLatLng(); c.x = ll.lng; c.y = ll.lat; assign(); updateMapDynamic(); });
+    m.on('drag', e=>{ const km = latLngToKm(e.target.getLatLng()); c.x = km.x; c.y = km.y; assign(); updateMapDynamic(); });
     m.on('dragend', ()=>{ setStatus('צנטרואיד הוזז ידנית — הנקודות שויכו מחדש.'); render(); });
     state.mapCentroidMarkers.push(m);
   });
   if(!state._mapFitted && bounds.length){ state.map.fitBounds(bounds, {padding:[30,30]}); state._mapFitted = true; }
+  renderGrid();
   setTimeout(()=>{ if(state.map) state.map.invalidateSize(); }, 50);
 }
 
@@ -1035,7 +1150,7 @@ function updateMapDynamic(){
     state.points.forEach(p=>{
       if(p.cluster<0) return;
       const c = state.centroids[p.cluster];
-      const line = L.polyline([[p.y,p.x],[c.y,c.x]], {color: PALETTE[p.cluster % PALETTE.length], weight:2.4, opacity:0.65}).addTo(state.map);
+      const line = L.polyline([kmToLatLng(p),kmToLatLng(c)], {color: PALETTE[p.cluster % PALETTE.length], weight:2.4, opacity:0.65}).addTo(state.map);
       state.mapLines.push(line);
     });
   }
@@ -1050,7 +1165,7 @@ function isMapMode(){ return state.vizMode==='map' && state.geoAvailable; }
 // clearly even when that toggle is off.
 function drawFlourishLine(p, c, color){
   if(isMapMode()){
-    const line = L.polyline([[p.y,p.x],[c.y,c.x]], {color, weight:2.4, opacity:0.85}).addTo(state.map);
+    const line = L.polyline([kmToLatLng(p),kmToLatLng(c)], {color, weight:2.4, opacity:0.85}).addTo(state.map);
     return { remove(){ state.map.removeLayer(line); } };
   }
   const svg = $('svgStage');
@@ -1121,13 +1236,13 @@ async function revealPointAssignmentSVG(p, bestCi, timings, myGen){
 
 // Step 2 (map): same idea with Leaflet polylines / a circle marker ring.
 async function revealPointAssignmentMap(p, bestCi, timings, myGen){
-  const lines = state.centroids.map((c,i)=>L.polyline([[p.y,p.x],[c.y,c.x]], {
+  const lines = state.centroids.map((c,i)=>L.polyline([kmToLatLng(p),kmToLatLng(c)], {
     color: PALETTE[i % PALETTE.length],
     weight: i===bestCi ? 3 : 1.6,
     opacity: i===bestCi ? 0.95 : 0.35,
     dashArray:'5,4'
   }).addTo(state.map));
-  const ring = L.circleMarker([p.y,p.x], {radius:9, color: PALETTE[bestCi % PALETTE.length], weight:2, fill:false, opacity:0.9}).addTo(state.map);
+  const ring = L.circleMarker(kmToLatLng(p), {radius:9, color: PALETTE[bestCi % PALETTE.length], weight:2, fill:false, opacity:0.9}).addTo(state.map);
 
   await sleep(timings.showMs);
   if(choreoCancelled(myGen)){ lines.forEach(l=>state.map.removeLayer(l)); state.map.removeLayer(ring); return; }
@@ -1193,13 +1308,13 @@ function drawTargetCrossesSVG(targets){
 function drawTargetCrossesMap(targets){
   const layers = targets.flatMap((t,ci)=>{
     const color = PALETTE[ci % PALETTE.length];
-    const circle = L.circleMarker([t.y,t.x], {radius:11, color, weight:2, dashArray:'3,3', fill:false, opacity:0.85}).addTo(state.map);
+    const circle = L.circleMarker(kmToLatLng(t), {radius:11, color, weight:2, dashArray:'3,3', fill:false, opacity:0.85}).addTo(state.map);
     const icon = L.divIcon({
       className:'',
       html:`<div style="width:32px;height:32px;position:relative;"><div style="position:absolute;top:15px;left:0;width:32px;height:2px;background:${color};opacity:.8;"></div><div style="position:absolute;left:15px;top:0;width:2px;height:32px;background:${color};opacity:.8;"></div></div>`,
       iconSize:[32,32], iconAnchor:[16,16]
     });
-    const cross = L.marker([t.y,t.x], {icon, interactive:false}).addTo(state.map);
+    const cross = L.marker(kmToLatLng(t), {icon, interactive:false}).addTo(state.map);
     return [circle, cross];
   });
   return () => layers.forEach(l=>state.map.removeLayer(l));
@@ -1253,7 +1368,7 @@ function drawChangedHighlightsSVG(points){
   };
 }
 function drawChangedHighlightsMap(points){
-  const rings = points.map(p=>L.circleMarker([p.y,p.x], {radius:9, color:'#fff', weight:2.2, fill:false, opacity:1}).addTo(state.map));
+  const rings = points.map(p=>L.circleMarker(kmToLatLng(p), {radius:9, color:'#fff', weight:2.2, fill:false, opacity:1}).addTo(state.map));
   return {
     setOpacity(v){ rings.forEach(r=>r.setStyle({opacity:v})); },
     remove(){ rings.forEach(r=>state.map.removeLayer(r)); }
@@ -1616,7 +1731,7 @@ async function loadDatasetById(id){
     if(!res.ok) throw new Error('HTTP '+res.status);
     const text = await res.text();
     const {headers, rows} = parseCSV(text);
-    loadDataset(headers, rows);
+    loadDataset(headers, rows, ds.origin);
     setStatus('');
   }catch(err){
     setStatus(`שגיאה בטעינת ${ds.file}. ודאו שהאתר מוגש משרת http ושהקובץ קיים.`);
@@ -2195,7 +2310,7 @@ function resetAll(){
   stopChoreography();
   hidePointInfo();
   if(state.map){ state.map.remove(); state.map = null; }
-  state.headers=[]; state.rows=[]; state.numericCols=[]; state.latCol=null; state.lonCol=null;
+  state.headers=[]; state.rows=[]; state.numericCols=[]; state.kmXCol=null; state.kmYCol=null; state.geoOrigin=null; state.gridLayer=null;
   state.xCol=null; state.yCol=null; state.vizMode='scatter'; state.geoAvailable=false;
   state.points=[]; state.k=3; state.centroids=[]; state.centroidTrails=[];
   state.showLines=false; state.showSilhouette=false; state.minmax=false;

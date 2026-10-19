@@ -5,25 +5,29 @@
       "id": "geoCities",
       "name": "ערים בישראל",
       "desc": "מיקומים גיאוגרפיים סביב 4 ערים",
-      "file": "data/geo_cities.csv"
+      "file": "data/geo_cities.csv",
+      "origin": { "lat": 31.1, "lon": 34.5 }
     },
     {
       "id": "hospitalVillages",
       "name": "יישובים — בית חולים שדה",
       "desc": "סט הנתונים של תרחיש 1",
-      "file": "data/hospital_villages.csv"
+      "file": "data/hospital_villages.csv",
+      "origin": { "lat": 31.7, "lon": 34.8 }
     },
     {
       "id": "villagesData",
       "name": "כפרים — מספר נפגעים",
       "desc": "200 כפרים עם מיקום ומספר נפגעים בכל כפר",
-      "file": "data/villages_data.csv"
+      "file": "data/villages_data.csv",
+      "origin": { "lat": 23.6, "lon": 80.1 }
     },
     {
       "id": "villagesData25pct",
       "name": "כפרים — מספר נפגעים (מדגם 25%)",
       "desc": "50 כפרים — מדגם של רבע מסט הכפרים המלא",
-      "file": "data/villages_data_25pct.csv"
+      "file": "data/villages_data_25pct.csv",
+      "origin": { "lat": 23.6, "lon": 80.1 }
     },
     {
       "id": "plainBlobs",

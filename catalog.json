@@ -14,6 +14,18 @@
       "file": "data/hospital_villages.csv"
     },
     {
+      "id": "villagesData",
+      "name": "כפרים — מספר נפגעים",
+      "desc": "200 כפרים עם מיקום ומספר נפגעים בכל כפר",
+      "file": "data/villages_data.csv"
+    },
+    {
+      "id": "villagesData25pct",
+      "name": "כפרים — מספר נפגעים (מדגם 25%)",
+      "desc": "50 כפרים — מדגם של רבע מסט הכפרים המלא",
+      "file": "data/villages_data_25pct.csv"
+    },
+    {
       "id": "plainBlobs",
       "name": "אשכולות מספריים כלליים",
       "desc": "ארבעה אשכולות דו-ממדיים + שני חריגים",

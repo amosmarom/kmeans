@@ -184,6 +184,17 @@
   }
   .centroid-pop{ animation:centroidPop 0.4s cubic-bezier(.34,1.56,.64,1); transform-box:fill-box; transform-origin:center; }
   .centroid-pop-icon{ animation:centroidPop 0.4s cubic-bezier(.34,1.56,.64,1); transform-origin:center; }
+  /* a point switching to another centroid: pop from its old color + expanding ring */
+  @keyframes switchPop{ 0%{ transform:scale(2.3); } 55%{ transform:scale(0.85); } 100%{ transform:scale(1); } }
+  @keyframes switchFill{ 0%,30%{ fill:var(--from); } }
+  @keyframes switchBg{ 0%,30%{ background:var(--from); } }
+  @keyframes switchRing{ 0%{ transform:scale(1); opacity:1; } 100%{ transform:scale(4.5); opacity:0; } }
+  .pt-switch{ animation:switchPop 1.1s ease-out, switchFill 1.1s ease-out; transform-box:fill-box; transform-origin:center; }
+  .switch-ring{ fill:none; stroke-width:2.5; pointer-events:none; opacity:0;
+    animation:switchRing 1.1s ease-out; transform-box:fill-box; transform-origin:center; }
+  .pt-switch-icon{ animation:switchPop 1.1s ease-out, switchBg 1.1s ease-out; }
+  .switch-ring-icon{ position:absolute; inset:0; border:2.5px solid; border-radius:50%; opacity:0; pointer-events:none;
+    animation:switchRing 1.1s ease-out; }
 
   /* ===== Right sidebar stats ===== */
   table.stats{ width:100%; border-collapse:collapse; font-family:var(--mono); font-size:12px; }
@@ -275,7 +286,6 @@
         </select>
       </label>
       <div class="hint" id="scenarioDesc" style="display:none;"></div>
-      <button class="btn-full" id="btnScenarioRandom" style="display:none; margin-top:10px;">🎲 אתחול אקראי לתרחיש</button>
     </div>
 
     <div class="panel">
@@ -316,6 +326,7 @@
           <button id="kPlus">+</button>
         </div>
       </label>
+      <button class="btn-full" id="btnScenarioRandom" style="display:none; margin-bottom:10px;">🎲 אתחול אקראי לתרחיש</button>
       <div class="hint">גרירת צנטרואיד באופן ידני מפעילה שיוך מחדש של הנקודות, ללא הזזה אוטומטית של המרכז.</div>
     </div>
 
@@ -408,7 +419,7 @@
       <div>
         <h2>🎓 מצב הגדרות מורה</h2>
         <!-- bump on every release: version + last-updated date/time -->
-        <div class="app-version" id="appVersion">v1.30 · עודכן לאחרונה: 19/10/2026 20:23</div>
+        <div class="app-version" id="appVersion">v1.31 · עודכן לאחרונה: 25/10/2026 10:19</div>
       </div>
       <button class="small" id="btnCloseTeacher">✕ סגור</button>
     </div>
@@ -424,7 +435,8 @@
         <label class="tm-check"><input type="checkbox" data-vis="linesToggle"> קווי מרחק לצנטרואיד</label>
         <label class="tm-check"><input type="checkbox" data-vis="minmaxToggle"> נרמול Min-Max</label>
         <label class="tm-check"><input type="checkbox" data-vis="silhouetteToggle"> ניתוח סילואט</label>
-        <label class="tm-check"><input type="checkbox" data-vis="statsSection"> סטטיסטיקת אשכולות (כולל WCSS ואיטרציות)</label>
+        <label class="tm-check"><input type="checkbox" data-vis="statsSection"> סטטיסטיקת אשכולות</label>
+        <label class="tm-check"><input type="checkbox" data-vis="telemetry"> WCSS, מספר איטרציה וגרף (בכותרת)</label>
         <label class="tm-check"><input type="checkbox" data-vis="aboutPanel"> פאנל "אודות המודל"</label>
         <label class="tm-check"><input type="checkbox" data-vis="resetButton"> כפתור איפוס</label>
 
@@ -727,30 +739,50 @@ function centroidOriginalCoords(c){
   return { x: c.x*(d.xmax-d.xmin)+d.xmin, y: c.y*(d.ymax-d.ymin)+d.ymin };
 }
 
-function showPointInfo(p){
+// What the info box is showing ({kind:'point', p} or {kind:'centroid', ci}),
+// so it can be refreshed live while a centroid is dragged or the demo runs.
+let infoTarget = null;
+function showPointInfo(p){ infoTarget = {kind:'point', p}; refreshInfoBox(); }
+function showCentroidInfo(ci){ infoTarget = {kind:'centroid', ci}; refreshInfoBox(); }
+
+function refreshInfoBox(){
+  if(!infoTarget) return;
   const isMap = (state.vizMode==='map' && state.geoAvailable);
   const xLabel = isMap ? 'X (ק״מ)' : (state.xCol || 'X');
   const yLabel = isMap ? 'Y (ק״מ)' : (state.yCol || 'Y');
-  const labelCol = state.headers.find(h=>!state.numericCols.includes(h));
-  const pointName = (labelCol && p.row[labelCol]) ? p.row[labelCol] : `נקודה #${p.id+1}`;
+  const coordsHtml = (x,y) => `<div>${escapeHtml(xLabel)}: ${fmtNum(x)}</div><div>${escapeHtml(yLabel)}: ${fmtNum(y)}</div>`;
+  let html;
 
-  let html = `<div class="pi-title">${escapeHtml(pointName)}</div>`;
-  html += `<div>${escapeHtml(xLabel)}: ${fmtNum(p.ox)}</div>`;
-  html += `<div>${escapeHtml(yLabel)}: ${fmtNum(p.oy)}</div>`;
-
-  if(p.cluster>=0 && state.centroids[p.cluster]){
-    const oc = centroidOriginalCoords(state.centroids[p.cluster]);
-    html += `<div class="pi-section"><b>צנטרואיד ${p.cluster+1}</b></div>`;
-    html += `<div>${escapeHtml(xLabel)}: ${fmtNum(oc.x)}</div>`;
-    html += `<div>${escapeHtml(yLabel)}: ${fmtNum(oc.y)}</div>`;
+  if(infoTarget.kind==='centroid'){
+    const ci = infoTarget.ci, c = state.centroids[ci];
+    if(!c){ hidePointInfo(); return; }
+    const oc = centroidOriginalCoords(c);
+    const s = computeStats().sums[ci];
+    const unit = isMap ? ' ק״מ' : '';
+    html = `<div class="pi-title"><span class="swatch" style="background:${PALETTE[ci % PALETTE.length]}"></span> צנטרואיד ${ci+1}</div>`;
+    html += coordsHtml(oc.x, oc.y);
+    html += `<div class="pi-section"><b>${s.n} נקודות משויכות</b></div>`;
+    html += `<div>סכום מרחקים: ${fmtCommaNum(s.sum,2)}${unit}</div>`;
+    html += `<div>מרחק ממוצע: ${s.n ? fmtCommaNum(s.sum/s.n,2) + unit : '–'}</div>`;
   }else{
-    html += `<div class="pi-section">טרם שויכה לאשכול</div>`;
+    const p = infoTarget.p;
+    const labelCol = state.headers.find(h=>!state.numericCols.includes(h));
+    const pointName = (labelCol && p.row[labelCol]) ? p.row[labelCol] : `נקודה #${p.id+1}`;
+    html = `<div class="pi-title">${escapeHtml(pointName)}</div>`;
+    html += coordsHtml(p.ox, p.oy);
+    if(p.cluster>=0 && state.centroids[p.cluster]){
+      const oc = centroidOriginalCoords(state.centroids[p.cluster]);
+      html += `<div class="pi-section"><b>צנטרואיד ${p.cluster+1}</b></div>`;
+      html += coordsHtml(oc.x, oc.y);
+    }else{
+      html += `<div class="pi-section">טרם שויכה לאשכול</div>`;
+    }
   }
 
   $('pointInfoContent').innerHTML = html;
   $('pointInfoBox').style.display = 'block';
 }
-function hidePointInfo(){ $('pointInfoBox').style.display = 'none'; }
+function hidePointInfo(){ infoTarget = null; $('pointInfoBox').style.display = 'none'; }
 $('btnClosePointInfo').addEventListener('click', hidePointInfo);
 
 // ---------------- K-Means core ----------------
@@ -816,13 +848,28 @@ function initCentroids(){
   state.centroidTrails = chosen.map(c=>[{x:c.x, y:c.y}]);
 }
 
+// A point that moves from one centroid to another is marked so the next
+// renders animate it: a pop from its old color to the new one plus an
+// expanding ring. Renders during a drag rebuild the marks, so a negative
+// animation-delay resumes the animation where it was instead of restarting.
+const SWITCH_MS = 1100;
+function setCluster(p, ci){
+  if(p.cluster>=0 && ci>=0 && p.cluster!==ci){ p._switchedAt = performance.now(); p._fromCluster = p.cluster; }
+  p.cluster = ci;
+}
+function switchAge(p){
+  if(p._switchedAt==null) return null;
+  const age = performance.now() - p._switchedAt;
+  return age < SWITCH_MS ? age : null;
+}
+
 function assign(){
   let changed = false;
   state.points.forEach(p=>{
     let best=-1, bd=Infinity;
     state.centroids.forEach((c,ci)=>{ const d=dist(p,c); if(d<bd){bd=d; best=ci;} });
     if(p.cluster!==best) changed = true;
-    p.cluster = best;
+    setCluster(p, best);
   });
   return changed;
 }
@@ -957,6 +1004,17 @@ function renderSVG(){
     c.style.cursor = 'pointer';
     c.addEventListener('click', e=>{ e.stopPropagation(); showPointInfo(p); });
     svg.appendChild(c);
+    const age = switchAge(p);
+    if(age!=null){
+      c.setAttribute('class','pt-switch');
+      c.style.setProperty('--from', PALETTE[p._fromCluster % PALETTE.length]);
+      c.style.animationDelay = `-${age}ms`;
+      const ring = document.createElementNS(SVG_NS,'circle');
+      ring.setAttribute('cx', sx(p.x)); ring.setAttribute('cy', sy(p.y)); ring.setAttribute('r','5');
+      ring.setAttribute('class','switch-ring'); ring.setAttribute('stroke', PALETTE[p.cluster % PALETTE.length]);
+      ring.style.animationDelay = `-${age}ms`;
+      svg.appendChild(ring);
+    }
   });
   state.centroids.forEach((c,ci)=>{
     const g = document.createElementNS(SVG_NS,'g');
@@ -975,6 +1033,7 @@ function renderSVG(){
     dot.setAttribute('cx', sx(c.x)); dot.setAttribute('cy', sy(c.y)); dot.setAttribute('r','7');
     dot.setAttribute('fill', PALETTE[ci % PALETTE.length]); dot.setAttribute('stroke','#fff'); dot.setAttribute('stroke-width','1.6');
     g.appendChild(halo); g.appendChild(dot); g.appendChild(cross1); g.appendChild(cross2);
+    g.addEventListener('click', e=>{ e.stopPropagation(); showCentroidInfo(ci); });
     svg.appendChild(g);
     attachDrag(g, ci);
   });
@@ -1073,6 +1132,20 @@ function renderGrid(){
   }
 }
 
+function pointIcon(p){
+  const color = p.cluster>=0 ? PALETTE[p.cluster % PALETTE.length] : '#5a6478';
+  const age = switchAge(p);
+  if(age==null) return coloredIcon(color,false);
+  const delay = `animation-delay:-${age}ms;`;
+  return L.divIcon({
+    className:'',
+    html:`<div style="position:relative;width:11px;height:11px;">
+      <div class="pt-switch-icon" style="--from:${PALETTE[p._fromCluster % PALETTE.length]};${delay}width:11px;height:11px;border-radius:50%;background:${color};border:1.5px solid #0d1016;box-sizing:border-box;box-shadow:0 0 4px rgba(0,0,0,.5);"></div>
+      <div class="switch-ring-icon" style="${delay}border-color:${color};"></div></div>`,
+    iconSize:[11,11], iconAnchor:[5.5,5.5]
+  });
+}
+
 function coloredIcon(color, big, pop){
   // The pop animation is applied to our own inner div, not the className on
   // the outer wrapper -- Leaflet positions markers via a transform on that
@@ -1105,8 +1178,7 @@ function renderMap(){
 
   const bounds = [];
   state.points.forEach(p=>{
-    const color = p.cluster>=0 ? PALETTE[p.cluster % PALETTE.length] : '#5a6478';
-    const m = L.marker(kmToLatLng(p), {icon: coloredIcon(color,false), interactive:true}).addTo(state.map);
+    const m = L.marker(kmToLatLng(p), {icon: pointIcon(p), interactive:true}).addTo(state.map);
     m._colorCluster = p.cluster;
     m.on('click', ()=>showPointInfo(p));
     state.mapMarkers.push(m);
@@ -1123,6 +1195,7 @@ function renderMap(){
   state.centroids.forEach((c,ci)=>{
     const m = L.marker(kmToLatLng(c), {icon: coloredIcon(PALETTE[ci % PALETTE.length], true, ci===state._popCentroidIdx), draggable:true}).addTo(state.map);
     m.on('dragstart', ()=>{ stopChoreography(); });
+    m.on('click', ()=>showCentroidInfo(ci));
     m.on('drag', e=>{ const km = latLngToKm(e.target.getLatLng()); c.x = km.x; c.y = km.y; assign(); updateMapDynamic(); });
     m.on('dragend', ()=>{ setStatus('צנטרואיד הוזז ידנית — הנקודות שויכו מחדש.'); render(); });
     state.mapCentroidMarkers.push(m);
@@ -1140,8 +1213,7 @@ function updateMapDynamic(){
   state.points.forEach((p,i)=>{
     const marker = state.mapMarkers[i];
     if(marker && marker._colorCluster !== p.cluster){
-      const color = p.cluster>=0 ? PALETTE[p.cluster % PALETTE.length] : '#5a6478';
-      marker.setIcon(coloredIcon(color,false));
+      marker.setIcon(pointIcon(p));
       marker._colorCluster = p.cluster;
     }
   });
@@ -1155,6 +1227,7 @@ function updateMapDynamic(){
     });
   }
   renderStatsOnly();
+  refreshInfoBox();
 }
 
 // ---------------- Choreographed demonstration: phase implementations ----------------
@@ -1397,7 +1470,7 @@ async function playReassignChanged(myGen){
   handle.remove();
   if(choreoCancelled(myGen)) return changed;
 
-  changed.forEach(({p,to})=>{ p.cluster = to; });
+  changed.forEach(({p,to})=>{ setCluster(p, to); });
   render(true);
   return changed;
 }
@@ -1592,6 +1665,7 @@ function render(skipStats){
   if(!skipStats){ renderStatsTable(); renderLegend(); renderTrace(); }
   else { renderLegend(); }
   if(state.showSilhouette) renderSilhouette();
+  refreshInfoBox();
 }
 
 // ---------------- Catalog (fetched from catalog.json + /data/*.csv) ----------------
@@ -1766,7 +1840,7 @@ const teacherConfig = {
   visible: {
     scenarioPanel:true, fileUpload:true, columnSelectors:true,
     kControl:true, reinitButton:true, runButtons:true,
-    linesToggle:true, minmaxToggle:true, silhouetteToggle:true, statsSection:true,
+    linesToggle:true, minmaxToggle:true, silhouetteToggle:true, statsSection:true, telemetry:true,
     aboutPanel:true, resetButton:true
   },
   scenarioVisibility: {},   // scenario id -> shown to student (default true)
@@ -1898,13 +1972,12 @@ function updateGhTokenStatus(){
 }
 
 // Each key maps to one element id, or an array of ids when a single toggle
-// needs to hide several disjoint parts of the page together (e.g. the stats
-// panel in the right sidebar plus the WCSS/iteration readouts in the header).
+// needs to hide several disjoint parts of the page together.
 const VIS_TARGETS = {
   scenarioPanel:'panelScenario', fileUpload:'ctrlFileUpload',
   kControl:'ctrlKControl', reinitButton:'btnReinit', runButtons:'ctrlRunButtons',
   linesToggle:'btnLines', minmaxToggle:'btnMinMax',
-  silhouetteToggle:'btnSilhouette', statsSection:['panelStats','ctrlTelemetry'],
+  silhouetteToggle:'btnSilhouette', statsSection:'panelStats', telemetry:'ctrlTelemetry',
   aboutPanel:'panelAbout', resetButton:'btnReset'
 };
 
